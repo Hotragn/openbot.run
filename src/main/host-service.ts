@@ -27,6 +27,7 @@ import type {
   SetTeamTypingInput,
   TeamMemberSummary,
   TeamPresenceSnapshot,
+  TeamRole,
   TeamSessionSummary,
   UpdateHostIdentityInput,
   UpdateTeamMemberInput,
@@ -75,6 +76,8 @@ interface HostServiceOptions {
   channels?: ChannelService;
   mcpServers?: ForwardedApiOptions["mcpServers"];
   mcpSignIns?: ForwardedApiOptions["mcpSignIns"];
+  signInRelay?: ForwardedApiOptions["signInRelay"];
+  connectors?: ForwardedApiOptions["connectors"];
   providerHostSignIns?: ForwardedApiOptions["providerHostSignIns"];
   mcpToolRuntimePreparation?: ForwardedApiOptions["mcpToolRuntimePreparation"];
   storage?: ForwardedApiOptions["storage"];
@@ -296,6 +299,8 @@ export class HostService extends EventEmitter<HostEvents> {
       channels: options.channels,
       mcpServers: options.mcpServers,
       mcpSignIns: options.mcpSignIns,
+      signInRelay: options.signInRelay,
+      connectors: options.connectors,
       providerHostSignIns: options.providerHostSignIns,
       mcpToolRuntimePreparation: options.mcpToolRuntimePreparation,
       storage: options.storage,
@@ -793,6 +798,7 @@ export class HostService extends EventEmitter<HostEvents> {
         publicKey: string;
         username: string;
         sessionToken: string;
+        role: TeamRole;
       },
       RemoteWorkflowError,
       HostApiRuntime
@@ -827,6 +833,8 @@ export class HostService extends EventEmitter<HostEvents> {
         publicKey: identity.publicKey,
         username,
         sessionToken: authenticated.sessionToken,
+        // An owner can promote the test client, so the client shows what the host allows it.
+        role: authenticated.member.role,
       };
     },
     (operation) => this.#provide(operation),
