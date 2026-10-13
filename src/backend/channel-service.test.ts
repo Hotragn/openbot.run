@@ -437,6 +437,32 @@ describe("shared channel coordination", () => {
     expect(service.store.assignments("channel-1")[0]?.state).not.toBe("interrupted");
     expect(service.store.tasks("channel-1")[0]?.state).toBe("running");
   });
+  it("names the lead's redacted failure when routing fails", async () => {
+    generate.mockReturnValueOnce(
+      Effect.fail(channelFailure(new Error("Claude is signed out. Authorization: Bearer secret-token-7f3a9c2e41"))),
+    );
+    await runChannel(
+      service.command(
+        {
+          type: "send",
+          channelId: "channel-1",
+          operationId: operationId(),
+          text: "Can someone help?",
+          recipientAgentId: null,
+          replyToMessageId: null,
+          attachmentDraftIds: [],
+        },
+        actor,
+      ),
+    );
+    await vi.waitFor(() => expect(service.store.tasks("channel-1")[0]?.state).toBe("paused"));
+    const notice = required(service.store.messages("channel-1").find((item) => item.author.kind === "coordinator"));
+    expect(notice.message.text).toContain(
+      "Routing failed. Choose a member or try again. The lead reported: Claude is signed out.",
+    );
+    expect(notice.message.text).not.toContain("secret-token-7f3a9c2e41");
+  });
+
   it("asks one visible question for ambiguous routing and never broadcasts", async () => {
     generate.mockReturnValueOnce(Effect.succeed(JSON.stringify({ question: "Which member should own this?" })));
     await runChannel(

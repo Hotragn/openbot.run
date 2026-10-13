@@ -786,6 +786,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
         return session ? this.#compaction.contextInputCharacters(session.externalSessionId) : 120_000;
       },
       forgetThread: (threadId) => this.#forgetExecutionThread(threadId).pipe(toChannelOperationError),
+      redact: (text) => this.#mcp.redact(text),
       loadedSnapshot: (threadId) => this.#conversation.loadedExecutionSnapshot(threadId),
       normalBusy: () =>
         this.#mailbox

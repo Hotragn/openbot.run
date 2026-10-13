@@ -59,6 +59,9 @@ export const messages = defineMessages("error.backend", {
   "error.backend.channelLeadRequired": "Choose an available channel lead or assign this task to a member.",
   "error.backend.channelRoutingTooLong":
     "This request exceeds the routing context limit. Select a member or send a shorter request.",
+  "error.backend.channelRoutingFailed": "Routing failed. Choose a member or try again.",
+  "error.backend.channelRoutingFailedDetail":
+    "Routing failed. Choose a member or try again. The lead reported: {reason}",
   "error.backend.channelTaskMemberRequired": "Choose a member for this task.",
   "error.backend.channelRequestMemberRequired": "Choose a member for this request.",
   "error.backend.channelDeliveryNotCreated": "Channel delivery was not created.",

@@ -22,6 +22,7 @@ import {
 } from "@openbot/contracts/ipc";
 import { isDynamicRecord, isString } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
+import { redactText } from "@openbot/logging";
 import { Deferred, Effect, Exit, Fiber, Result, Schema, Scope } from "effect";
 import { type ChannelOperationError, channelFailure, channelResult, channelSync } from "./channel-effects";
 import { ChannelHistory, type ChannelTextModel, isMemberThinking } from "./channel-history";
@@ -63,6 +64,8 @@ export interface ChannelHooks {
   queueHoldChanged?(): void;
   /** A memory is not part of the channel revision, so a tool write needs its own notification. */
   memoriesChanged?(channelId: string): void;
+  /** Removes provider and MCP secrets from text that every channel member reads. */
+  redact?(text: string): string;
   error(error: unknown): void;
 }
 
@@ -82,6 +85,7 @@ class ChannelRoutingError extends Schema.TaggedError<ChannelRoutingError>()("Cha
 const ROUTING_RECENT_MESSAGES = 5;
 const ROUTING_TEXT_CHARACTERS = 600;
 const ROUTING_PROMPT_CHARACTERS = 120_000;
+const ROUTING_REASON_CHARACTERS = 300;
 
 /** One outcome only; reject extra fields when decoding the model response. */
 const RoutingDecision = Schema.Union([
@@ -944,8 +948,18 @@ export class ChannelService {
             continue;
           }
           channel = yield* channelSync(() => this.store.get(channelId));
+          // The lead's provider names why it failed: signed out, a usage limit, a model it cannot use.
+          // Every member reads this message, so the reason is redacted and kept short.
+          const reason =
+            error instanceof Error && error.message.trim()
+              ? (this.hooks.redact ?? redactText)(error.message.trim()).slice(0, ROUTING_REASON_CHARACTERS)
+              : null;
           const detail =
-            error instanceof ChannelRoutingError ? error.message : "Routing failed. Choose a member or try again.";
+            error instanceof ChannelRoutingError
+              ? error.message
+              : reason
+                ? sourceText("error.backend.channelRoutingFailedDetail", { reason })
+                : sourceText("error.backend.channelRoutingFailed");
           yield* channelSync(() =>
             this.store.update(channel, {
               tasks: [{ ...task, state: "paused", error: detail }],
