@@ -11,8 +11,8 @@ import {
   type ExternalDestination,
   GROK_BOT_EXPORT_URL,
 } from "@openbot/contracts/ipc";
-import { sourceText } from "@openbot/i18n/source";
 import { app, type BrowserWindow, shell } from "electron";
+import { version as developmentVersion } from "../../../package.json";
 import type { AgentService } from "../../backend/agent-service";
 import type { BrowserHost } from "../../backend/browser-host";
 import type { MailboxStore } from "../../backend/mailbox-store";
@@ -52,7 +52,7 @@ import { stringPayload } from "./validation";
  * it is read from `mac-permission-urls.ts` rather than written twice. `hosted-server-contact` is a
  * `mailto:` address, which `openUrl` refuses; the web client opens the same constant.
  */
-export const EXTERNAL_DESTINATIONS: Record<ExternalDestination, string> = {
+const EXTERNAL_DESTINATIONS: Record<ExternalDestination, string> = {
   "agent-setup": "https://github.com/nightly-labs/openbot/blob/main/docs/TROUBLESHOOTING.md",
   "opencode-install": "https://opencode.ai/docs/",
   "opencode-auth": "https://opencode.ai/auth",
@@ -65,6 +65,8 @@ export const EXTERNAL_DESTINATIONS: Record<ExternalDestination, string> = {
 };
 
 import { runCauseEffect } from "../../backend/effect-boundary";
+import { openHttpLink } from "../message-link-relay";
+import type { ResourceMonitor } from "../resource-monitor";
 import type { TraceFile } from "../trace-file";
 import { handler, type IpcGroupHandlers, payloadHandler } from "./define-ipc-group";
 
@@ -84,9 +86,11 @@ export interface AppIpcDependencies {
   logoColor: LogoColorService;
   initializeAgent: () => Promise<void>;
   appVariant: AppVariant;
+  analyticsCaptureUrl: string | null;
   getMainWindow: () => BrowserWindow | null;
   setAnalyticsTrackingEnabled: (enabled: boolean) => void;
   trace: TraceFile;
+  resources: ResourceMonitor;
 }
 
 export function appIpcHandlers({
@@ -105,9 +109,11 @@ export function appIpcHandlers({
   logoColor,
   initializeAgent,
   appVariant,
+  analyticsCaptureUrl,
   getMainWindow,
   setAnalyticsTrackingEnabled,
   trace,
+  resources,
 }: AppIpcDependencies): Pick<IpcGroupHandlers, "app" | "maintenance"> {
   // One write at a time, so two quick toggles leave the file and the tracker at the last choice.
   const analyticsPreferenceWrites = Semaphore.makeUnsafe(1);
@@ -118,7 +124,15 @@ export function appIpcHandlers({
         if (platform !== "darwin" && platform !== "win32" && platform !== "linux") {
           throw new Error(`Unsupported desktop platform: ${platform}`);
         }
-        return { name: app.getName(), version: app.getVersion(), platform, variant: appVariant };
+        // electron-vite starts a script, so Electron reports its own version in development.
+        const version = app.isPackaged ? app.getVersion() : developmentVersion;
+        return {
+          name: app.getName(),
+          version,
+          platform,
+          variant: appVariant,
+          ...(analyticsCaptureUrl ? { analyticsCaptureUrl } : {}),
+        };
       }),
       getSetupState: handler(() => runCauseEffect(readSetupState(setupFile))),
       getAnalyticsPreference: handler(() => Effect.runPromise(readAnalyticsPreference(analyticsPreferenceFile))),
@@ -170,13 +184,9 @@ export function appIpcHandlers({
       openExternal: payloadHandler(parseExternalDestination, (parsed) => {
         return shell.openExternal(EXTERNAL_DESTINATIONS[parsed]);
       }),
-      openUrl: payloadHandler(stringPayload("URL", INPUT_LIMITS.browserUrl), (url) => {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-          throw new Error(sourceText("error.app.externalLinkProtocol"));
-        }
-        return shell.openExternal(parsed.toString());
-      }),
+      openUrl: payloadHandler(stringPayload("URL", INPUT_LIMITS.browserUrl), (url) =>
+        openHttpLink(url, (address) => shell.openExternal(address)),
+      ),
     },
     maintenance: {
       exportData: handler(() =>
@@ -191,6 +201,7 @@ export function appIpcHandlers({
             browser,
             updater,
             trace,
+            resources,
             parentWindow: getMainWindow(),
             translate: language.translate,
           }),

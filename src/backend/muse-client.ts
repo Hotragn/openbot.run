@@ -108,6 +108,7 @@ interface MuseThread {
 
 /** Owns one native MSP process, session MCP bridges, and the live view-to-OpenBot event adapter. */
 export class MuseAgentClient extends EventEmitter<ClientEvents> implements AgentClient {
+  readonly contextCompaction = "events";
   readonly provider: AgentProvider = "muse";
   readonly #cli: AgentCliInfo;
   readonly #options: MuseProviderOptions;
@@ -115,6 +116,8 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
   readonly #requests = new PendingServerRequests((request) => this.emit("request", request));
   readonly #threads = new Map<string, MuseThread>();
   readonly #children = new Map<string, MuseAgentClient>();
+  /** Owned children whose session open is in flight. They join `#children` when it succeeds. */
+  readonly #opening = new Set<MuseAgentClient>();
   readonly #secrets = new Set<string>();
   readonly #diagnostics = createDiagnosticStream({
     redact: (value) => this.#redact(value),
@@ -161,7 +164,7 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
     this.#stopping = true;
     this.#running = false;
     this.#requests.rejectAll("Muse stopped.");
-    for (const child of this.#children.values()) yield* child.stop();
+    for (const child of [...this.#children.values(), ...this.#opening]) yield* child.stop();
     this.#children.clear();
     for (const thread of this.#threads.values()) {
       for (const controller of thread.approvals.values()) controller.abort();
@@ -561,9 +564,16 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
     child.on("diagnostic", (message, origin) => this.emit("diagnostic", message, origin));
     child.once("exit", (error) => this.#fail(error));
     child.start();
-    const response = yield* child
-      .#openThread(params, resume)
-      .pipe(Effect.onError(() => child.stop().pipe(Effect.ignore)));
+    this.#opening.add(child);
+    const response = yield* child.#openThread(params, resume).pipe(
+      Effect.flatMap((opened) =>
+        this.#stopping
+          ? Effect.fail(providerFailure(new Error(sourceText("error.provider.museStopped"))))
+          : Effect.succeed(opened),
+      ),
+      Effect.onError(() => child.stop().pipe(Effect.ignore)),
+      Effect.ensuring(Effect.sync(() => this.#opening.delete(child))),
+    );
     this.#children.set(response.thread.id, child);
     return response;
   });
@@ -600,9 +610,11 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
       },
       id,
     ).pipe(
+      // `turn/started` is already out, so the turn must end too: without `turn/completed` the agent
+      // keeps it as its running turn and holds every later message.
       Effect.onError(() =>
         Effect.sync(() => {
-          thread.turn = null;
+          if (thread.turn?.id === id) this.#finish(thread, "failed");
         }),
       ),
     );

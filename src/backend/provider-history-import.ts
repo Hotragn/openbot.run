@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { AgentProviderId, ConversationMessage } from "@openbot/contracts/ipc";
+import { type AgentProviderId, type ConversationMessage, ROUTINE_QUIET_ANSWER_ITEM_TYPE } from "@openbot/contracts/ipc";
 import { Effect } from "effect";
 import { isImageGenerationItem } from "./agent/image-generation";
-import { isNoUpdateAnswer } from "./agent/routine-quiet-runs";
+import { isNoUpdateAnswer, isNoUpdateToolCall, isTextAnswer, keptQuietAnswer } from "./agent/routine-quiet-runs";
 import { mergeProviderHistoryMessages, messagesFromThreadItems, threadTurnBaseTime } from "./conversation-snapshots";
 import { databaseRow, decodeConversationMessageJson, requiredStringColumn } from "./database/database-rows";
 import type { DeliveryContext } from "./mailbox-store";
@@ -16,7 +16,7 @@ import type {
 } from "./provider-history";
 
 /** The synchronous database boundary needed by the bounded provider-history importer. */
-export interface ProviderHistoryImportDatabase {
+interface ProviderHistoryImportDatabase {
   readonly connection: DatabaseSync;
   ensureProviderHistoryImport(input: {
     sessionId: string;
@@ -57,8 +57,8 @@ export interface ProviderHistoryImportInput {
   findDelivery(deliveryId: string): DeliveryContext | null;
   findMessageDelivery(messageId: string): DeliveryContext | null;
   /**
-   * Whether this routine delivery can have ended quiet: a scheduled run, or a run of a deleted
-   * routine, whose record is gone. A Test, script or webhook run cannot.
+   * Whether this routine delivery can have ended quiet: a scheduled, script or webhook run, or a run
+   * of a deleted routine, whose record is gone. A Test run cannot.
    */
   quietRoutineDelivery(deliveryId: string): boolean;
 }
@@ -218,9 +218,10 @@ function importCompletedTurn(
           input.findMessageDelivery,
         ),
       };
-      // The turn completion dropped these answers from the chat, so the import does not bring them
-      // back.
-      const pageMessages = routine === "none" ? partial.messages : partial.messages.filter(keptRoutineMessage(routine));
+      // The turn completion dropped these answers from the chat, or kept them as quiet answers, so the
+      // import does the same.
+      const pageMessages =
+        routine === "none" ? partial.messages : partial.messages.flatMap(keptRoutineMessage(routine));
       const reconciled =
         input.provider === "claude"
           ? mergeProviderHistoryMessages(
@@ -258,13 +259,15 @@ function importCompletedTurn(
 }
 
 /**
- * How a turn that a scheduled routine run started answered: `quiet` when each answer is only the
- * no-update marker, so the turn completion dropped all of them with the turn's thinking, `answered`
- * for any other such turn, and `none` for a turn that no scheduled routine run started. A Test,
- * script or webhook run keeps its answers, as the turn completion does. Decided from the staged
- * items alone, one bounded page at a time, so it needs no stored state.
+ * How a turn that a quiet routine run started answered: `quiet` when each answer is only the
+ * no-update marker, or the agent called the no-update tool and generated no image, so the turn
+ * completion kept only its quiet answers; `image` when the agent called the tool
+ * and generated an image, so the completion dropped only the text answers; `answered` for any
+ * other such turn, and `none` for a turn that no quiet routine run started. A Test run keeps its
+ * answers, as the turn completion does. Decided from the staged items alone,
+ * one bounded page at a time, so it needs no stored state.
  */
-type RoutineTurnAnswers = "none" | "answered" | "quiet";
+type RoutineTurnAnswers = "none" | "answered" | "image" | "quiet";
 
 function routineTurnAnswers(
   input: ProviderHistoryImportInput,
@@ -274,6 +277,8 @@ function routineTurnAnswers(
     let routine: boolean | undefined;
     let markers = 0;
     let reported = false;
+    let noUpdateCalled = false;
+    let imageGenerated = false;
     let afterIndex = -1;
     while (true) {
       const page = yield* providerSync(() =>
@@ -290,7 +295,8 @@ function routineTurnAnswers(
           if (isNoUpdateAnswer(item.text)) markers += 1;
           else reported = true;
         }
-        if (isImageGenerationItem(item)) reported = true;
+        if (isImageGenerationItem(item)) imageGenerated = true;
+        if (isNoUpdateToolCall(item)) noUpdateCalled = true;
       }
       const last = page.at(-1);
       if (routine === false) return "none";
@@ -298,15 +304,19 @@ function routineTurnAnswers(
       afterIndex = last.itemIndex;
     }
     if (!routine) return "none";
-    return markers > 0 && !reported ? "quiet" : "answered";
+    if (noUpdateCalled) return imageGenerated ? "image" : "quiet";
+    return markers > 0 && !reported && !imageGenerated ? "quiet" : "answered";
   });
 }
 
 function keptRoutineMessage(routine: Exclude<RoutineTurnAnswers, "none">) {
-  return (message: ConversationMessage): boolean => {
-    if (message.author !== "assistant") return true;
-    if (routine === "quiet") return false;
-    return message.itemType === "commentary" || !isNoUpdateAnswer(message.text);
+  return (message: ConversationMessage): ConversationMessage[] => {
+    if (message.author !== "assistant") return [message];
+    if (routine === "quiet") {
+      return keptQuietAnswer(message) ? [{ ...message, itemType: ROUTINE_QUIET_ANSWER_ITEM_TYPE }] : [];
+    }
+    if (routine === "image") return isTextAnswer(message) ? [] : [message];
+    return message.itemType === "commentary" || !isNoUpdateAnswer(message.text) ? [message] : [];
   };
 }
 

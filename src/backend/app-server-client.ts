@@ -1,7 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { type DynamicRecord, isNumber, isString } from "@openbot/contracts/runtime-values";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { type AgentProvider, RequestTimeoutError } from "./agent-client";
 import { cliSpawnTarget } from "./cli";
 import { JsonLineDecoder, LineTooLongError } from "./jsonl";
@@ -23,7 +23,9 @@ import {
   type ProviderHistoryFragment,
   type ProviderHistoryRequest,
 } from "./provider-history";
+import { registerProviderProcess } from "./provider-processes";
 import { createDiagnosticStream } from "./stderr-diagnostics";
+import { endProcessTree } from "./windows-process-tree";
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -49,6 +51,7 @@ export class AppServerError extends Error {
 }
 
 export class CodexAppServerClient extends EventEmitter<ClientEvents> {
+  readonly contextCompaction = "events";
   readonly provider: AgentProvider = "codex";
   readonly #executable: string;
   readonly #requestTimeoutMs: number;
@@ -57,13 +60,19 @@ export class CodexAppServerClient extends EventEmitter<ClientEvents> {
   readonly #toolRequests = new Map<RequestId, { threadId: string; turnId: string; controller: AbortController }>();
   readonly #interruptedTurns = new Set<string>();
   #process: ChildProcessWithoutNullStreams | null = null;
+  /** The end of a process that failed. `stop` waits for it, because `#process` no longer holds it. */
+  #ending: Fiber.Fiber<void> | null = null;
   #nextId = 1;
   #stopping = false;
 
-  constructor(executable: string, requestTimeoutMs = 30_000) {
+  /** Added to the inherited environment, such as the `CODEX_HOME` of an account after the first. */
+  readonly #extraEnv: Readonly<Record<string, string>> | undefined;
+
+  constructor(executable: string, requestTimeoutMs = 30_000, extraEnv?: Readonly<Record<string, string>>) {
     super();
     this.#executable = executable;
     this.#requestTimeoutMs = requestTimeoutMs;
+    this.#extraEnv = extraEnv;
   }
 
   get running(): boolean {
@@ -78,11 +87,12 @@ export class CodexAppServerClient extends EventEmitter<ClientEvents> {
     const target = cliSpawnTarget(this.#executable, ["app-server", "--listen", "stdio://"]);
     const child = spawn(target.command, target.args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: this.#extraEnv ? { ...process.env, ...this.#extraEnv } : process.env,
       windowsVerbatimArguments: target.windowsVerbatimArguments,
       windowsHide: true,
     });
     this.#process = child;
+    registerProviderProcess(child, "codex");
 
     child.stdin.on("error", (error) => this.#fail(error, child));
     child.stdout.on("data", (chunk: Buffer) => {
@@ -115,26 +125,17 @@ export class CodexAppServerClient extends EventEmitter<ClientEvents> {
 
   readonly stop = Effect.fn("CodexAppServer.stop")(function* (this: CodexAppServerClient) {
     const child = this.#process;
-    if (!child) return;
+    if (!child) {
+      if (this.#ending) yield* Fiber.join(this.#ending);
+      return;
+    }
     this.#stopping = true;
     this.#cancelToolRequests();
     this.#process = null;
     for (const pending of this.#pending.values()) pending.reject(new Error("Codex App Server stopped."));
     this.#pending.clear();
     child.stdin.end();
-    if (child.exitCode !== null) return;
-    yield* Effect.callback<void>((resume) => {
-      const forceKill = setTimeout(() => {
-        if (child.exitCode === null) child.kill("SIGKILL");
-      }, 2_000);
-      const exited = () => resume(Effect.void);
-      child.once("exit", exited);
-      child.kill("SIGTERM");
-      return Effect.sync(() => {
-        clearTimeout(forceKill);
-        child.off("exit", exited);
-      });
-    });
+    yield* endProcessTree(child).pipe(Effect.orDie);
   }, Effect.uninterruptible);
 
   /**
@@ -377,7 +378,7 @@ export class CodexAppServerClient extends EventEmitter<ClientEvents> {
     }
     this.#pending.clear();
 
-    if (child.exitCode === null) child.kill("SIGTERM");
+    this.#ending = Effect.runFork(endProcessTree(child).pipe(Effect.orDie));
     if (!this.#stopping) this.emit("exit", error);
   }
 }

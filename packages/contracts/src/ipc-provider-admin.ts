@@ -1,18 +1,34 @@
 /**
- * The replies of a host's `providers-v1` to `providers-v4` routes, as the desktop main process and the browser client
- * both read them. The route codec has already checked their fields; these give them their IPC types
- * and fail closed on anything else. They decode what a host sends, so the preload does not use them.
+ * The replies of a host's `providers-v1` to `providers-v4` and `provider-host-sign-in-v1` routes, as the
+ * desktop main process and the browser client both read them. The route codec has already checked
+ * their fields; these give them their IPC types and fail closed on anything else.
  */
 
-import type { ProviderApiKeyStatus, ProviderCodeLoginStart } from "./ipc-agent-status";
+import { isAgentProvider } from "./agent-providers";
+import { INPUT_LIMITS } from "./input-limits";
+import {
+  type AccountUsage,
+  type HostProviderAccounts,
+  isAccountUsage,
+  isProviderAccountId,
+  isProviderAccountStatus,
+  MAX_PROVIDER_ACCOUNTS,
+  type ProviderApiKeyStatus,
+  type ProviderCodeLoginStart,
+  type ProviderHostSignInStatus,
+  type ProviderRelaySignInStatus,
+} from "./ipc-agent-status";
 import type { ProviderRuntimeSnapshot, ProviderRuntimeStatus } from "./ipc-app-auth";
+import { isBoundedString, isIdentifier, isNullableBoundedString } from "./ipc-bounded-values";
 import {
   type CustomProviderResult,
   type CustomProviderSummary,
   isCustomProviderResult,
   isCustomProviderSummary,
 } from "./ipc-custom-providers";
+import { decodeMcpSignInRelayPage } from "./ipc-mcp-servers";
 import { isDynamicRecord, isHttpsUrl, isNumber, isOneOf, isString } from "./runtime-values";
+import { PROVIDER_HOST_SIGN_IN_ERROR_LIMIT } from "./team-protocol/provider-host-sign-in-v1";
 
 /** Each URL becomes a link the admin opens, so it is held to https here as well. */
 export function decodeProviderCodeLoginStart(value: unknown): ProviderCodeLoginStart {
@@ -34,6 +50,54 @@ export function decodeProviderCodeLoginStart(value: unknown): ProviderCodeLoginS
     ...(value.verificationUrlComplete === undefined ? {} : { verificationUrlComplete: value.verificationUrlComplete }),
     expiresAt: value.expiresAt,
   };
+}
+
+export function decodeProviderHostSignInStatus(value: unknown): ProviderHostSignInStatus {
+  const invalid = () => new Error("Invalid sign-in response.");
+  if (!isDynamicRecord(value) || (value.tabId !== null && !isBoundedString(value.tabId, INPUT_LIMITS.identifier)))
+    throw invalid();
+  if (value.result === null) return { tabId: value.tabId, result: null };
+  if (!isDynamicRecord(value.result) || !isNullableBoundedString(value.result.error, PROVIDER_HOST_SIGN_IN_ERROR_LIMIT))
+    throw invalid();
+  return { tabId: value.tabId, result: { error: value.result.error } };
+}
+
+/** A provider this client does not know is left out, as the host's status leaves it out. */
+export function decodeHostProviderAccounts(value: unknown): HostProviderAccounts {
+  const invalid = () => new Error("Invalid provider accounts.");
+  if (!isDynamicRecord(value) || !Array.isArray(value.providers) || !Array.isArray(value.agents)) throw invalid();
+  const providers = value.providers.flatMap((row: unknown) => {
+    if (
+      !isDynamicRecord(row) ||
+      !Array.isArray(row.accounts) ||
+      row.accounts.length > MAX_PROVIDER_ACCOUNTS ||
+      !row.accounts.every(isProviderAccountStatus)
+    )
+      throw invalid();
+    return isAgentProvider(row.provider) ? [{ provider: row.provider, accounts: row.accounts }] : [];
+  });
+  const agents = value.agents.map((row: unknown) => {
+    if (!isDynamicRecord(row) || !isIdentifier(row.agentId) || !isProviderAccountId(row.accountId)) throw invalid();
+    return { agentId: row.agentId, accountId: row.accountId };
+  });
+  return { providers, agents };
+}
+
+/** Each reading names its account: the released usage routes give the provider's own sign-in. */
+export function decodeHostProviderAccountUsage(value: unknown): AccountUsage {
+  if (!isAccountUsage(value) || value.limits.some((limit) => limit.accountId === undefined))
+    throw new Error("Invalid provider account usage.");
+  return value;
+}
+
+export function decodeProviderRelaySignInStatus(value: unknown): ProviderRelaySignInStatus {
+  const invalid = () => new Error("Invalid sign-in response.");
+  if (!isDynamicRecord(value)) throw invalid();
+  const page = decodeMcpSignInRelayPage(value.page ?? null);
+  if (value.result === null) return { page, result: null };
+  if (!isDynamicRecord(value.result) || !isNullableBoundedString(value.result.error, PROVIDER_HOST_SIGN_IN_ERROR_LIMIT))
+    throw invalid();
+  return { page, result: { error: value.result.error } };
 }
 
 export function decodeProviderApiKeyStatus(value: unknown): ProviderApiKeyStatus {

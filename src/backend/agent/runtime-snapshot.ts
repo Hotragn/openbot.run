@@ -10,6 +10,7 @@ import {
   type AgentRuntimeSnapshot,
   type AgentSummary,
   CONVERSATION_PLAN_ITEM_TYPE,
+  ROUTINE_QUIET_ANSWER_ITEM_TYPE,
 } from "@openbot/contracts/ipc";
 import type { MailboxStore } from "../mailbox-store";
 import type { OpenBotDatabase } from "../openbot-database";
@@ -72,6 +73,12 @@ export function compactRuntimeApproval(approval: AgentApproval): AgentRuntimeSna
 function fitRuntimeSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
   if (runtimeSnapshotBytes(snapshot) <= AGENT_RUNTIME_SNAPSHOT_BYTES_LIMIT) return snapshot;
 
+  // Local-only context goes first, so it never costs Team clients a field they had before.
+  if (snapshot.contextStates?.length) {
+    snapshot.contextStates = [];
+    if (runtimeSnapshotBytes(snapshot) <= AGENT_RUNTIME_SNAPSHOT_BYTES_LIMIT) return snapshot;
+  }
+
   snapshot.agents = snapshot.agents.map((agent) => ({ ...agent, preview: "", avatarUrl: null }));
   if (runtimeSnapshotBytes(snapshot) <= AGENT_RUNTIME_SNAPSHOT_BYTES_LIMIT) return snapshot;
 
@@ -129,17 +136,19 @@ function runtimeSnapshotBytes(snapshot: AgentRuntimeSnapshot): number {
 }
 
 export interface RuntimeSnapshotSources {
+  contextStates?: AgentRuntimeSnapshot["contextStates"];
   agents: AgentSummary[];
   conversation: Pick<ConversationRuntime, "loadedSnapshot">;
   database: Pick<OpenBotDatabase, "readConversationRuntime">;
   mailbox: Pick<MailboxStore, "listRuntimeWork">;
   turn: Pick<TurnLifecycle, "failedTurns">;
   attention: Pick<AttentionRegistry, "runtimeAttention">;
-  usageLimits: Pick<UsageLimitGate, "limitedAgents">;
+  usageLimits: Pick<UsageLimitGate, "limitedAgents" | "limitedModels">;
 }
 
 /** The runtime view of every agent: active turns, queued work, latest messages and attention. */
 export function buildRuntimeSnapshot({
+  contextStates,
   agents,
   conversation,
   database,
@@ -171,7 +180,8 @@ export function buildRuntimeSnapshot({
         message.itemType !== "question_prompt" &&
         message.itemType !== "agent_attachment" &&
         !message.itemType?.startsWith(CHAT_VISUAL_ITEM_TYPE_PREFIX) &&
-        message.itemType !== CONVERSATION_PLAN_ITEM_TYPE,
+        message.itemType !== CONVERSATION_PLAN_ITEM_TYPE &&
+        message.itemType !== ROUTINE_QUIET_ANSWER_ITEM_TYPE,
     );
     const persisted =
       !live || !liveLatest
@@ -202,5 +212,7 @@ export function buildRuntimeSnapshot({
     ...attention.runtimeAttention(),
     failedTurns: [...turn.failedTurns()].map(([agentId, turnId]) => ({ agentId, turnId })),
     usageLimits: usageLimits.limitedAgents(),
+    usageLimitedModels: usageLimits.limitedModels(),
+    ...(contextStates ? { contextStates } : {}),
   });
 }

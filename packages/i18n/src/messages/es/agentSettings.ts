@@ -2,6 +2,14 @@ import type { PartialTranslation } from "../../message";
 import type { messages as source } from "../en/agentSettings";
 
 export const messages = {
+  "agentSettings.session.title": "Ajustes del proveedor",
+  "agentSettings.session.readFailed": "No se pudieron leer los ajustes del proveedor.",
+  "agentSettings.session.pending": "Los cambios guardados se aplican antes del siguiente turno.",
+  "agentSettings.session.unavailable":
+    "El valor guardado {value} no está disponible. Selecciona otro valor o restablécelo.",
+  "agentSettings.session.effective": "Valor actual del proveedor: {value}",
+  "agentSettings.session.reset": "Restablecer ajuste",
+  "agentSettings.session.resetNamed": "Restablecer {name}",
   "agentSettings.label": "Ajustes del agente",
   "agentSettings.title": "Ajustes",
   "agentSettings.backToDetails": "Volver a detalles",
@@ -9,6 +17,27 @@ export const messages = {
   "agentSettings.backToSettings": "Volver a la configuración",
   "agentSettings.permissions.title": "Permisos",
   "agentSettings.advanced.title": "Avanzado",
+  "agentSettings.backupModels.title": "Modelos de respaldo",
+  "agentSettings.backupModels.valueAsk": "Preguntar primero",
+  "agentSettings.backupModels.valueAutomatic": "Automático",
+  "agentSettings.backupModels.valueCount": { one: "{mode} · {count}", other: "{mode} · {count}" },
+  "agentSettings.backupModels.intro":
+    "Cuando {model} alcanza su límite de uso antes de que {name} empiece a escribir, {name} te pregunta qué modelo usar.",
+  "agentSettings.backupModels.introAutomatic":
+    "Cuando {model} alcanza su límite de uso antes de que {name} empiece a escribir, {name} cambia al primer modelo disponible del orden.",
+  "agentSettings.backupModels.ask": "Preguntar antes de cambiar",
+  "agentSettings.backupModels.order": "Orden",
+  "agentSettings.backupModels.listLabel": "Modelos de respaldo, en orden",
+  "agentSettings.backupModels.empty": "Sin orden definido. {name} ofrece cada modelo disponible.",
+  "agentSettings.backupModels.add": "Añadir modelo de respaldo",
+  "agentSettings.backupModels.moveUp": "Subir {model}",
+  "agentSettings.backupModels.moveDown": "Bajar {model}",
+  "agentSettings.backupModels.remove": "Quitar {model}",
+  "agentSettings.backupModels.limited": "Límite de uso alcanzado · omitido",
+  "agentSettings.backupModels.unavailable": "No disponible ahora · omitido",
+  "agentSettings.backupModels.withAccount": "{model} · {account}",
+  "agentSettings.backupModels.note":
+    "{name} nunca cambia después de empezar a escribir. Vuelve a {model} cuando termina el límite.",
   "agentSettings.groups.brain": "Cerebro",
   "agentSettings.groups.knows": "Sabe",
   "agentSettings.groups.does": "Hace",

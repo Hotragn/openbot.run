@@ -199,6 +199,46 @@ const NOTION: MarketplacePluginDetail = {
   shareUrl: "https://openbot.run/plugins/notion",
 };
 
+const COBRAIN: MarketplacePluginDetail = {
+  id: "plugin-cobrain",
+  slug: "cobrain",
+  name: "Cobrain",
+  tagline: "Shared memory for your AI agents",
+  description:
+    "Cobrain is a Markdown memory that every AI you connect can read and write. Agents load the context of a client or project before working, search past notes and decisions, and save what they learn so the next thread starts where the last one ended. Each user signs in to their own Cobrain account.",
+  category: "productivity",
+  creatorName: "cobrain.space",
+  iconUrl: "https://cobrain.space/apple-icon.png",
+  version: "1.0.0",
+  prompts: [
+    { id: "prompt-start-session", text: "Load my Cobrain context for this project before we start." },
+    { id: "prompt-search-decision", text: "Search my Cobrain notes for what we decided about pricing." },
+    { id: "prompt-save-note", text: "Save a note in Cobrain with what we did today and what is left." },
+  ],
+  apps: [
+    {
+      id: "app-cobrain-mcp",
+      name: "Cobrain",
+      description: "Read, search and write notes in your Cobrain brain over one MCP server.",
+      iconUrl: "https://cobrain.space/apple-icon.png",
+      server: {
+        name: "cobrain",
+        transport: "http",
+        url: "https://cobrain.space/mcp",
+        auth: [{ id: "cobrain-oauth", kind: "link", label: "Sign in" }],
+      },
+    },
+  ],
+  websiteUrl: "https://cobrain.space",
+  privacyPolicyUrl: "https://cobrain.space/privacy",
+  termsUrl: "https://cobrain.space/terms",
+  skills: [],
+  installs: 0,
+  featured: false,
+  updatedAt: "2026-09-30T00:00:00.000Z",
+  shareUrl: "https://openbot.run/plugins/cobrain",
+};
+
 const FIGMA: MarketplacePluginDetail = {
   id: "plugin-figma",
   slug: "figma",
@@ -328,6 +368,47 @@ const SENTRY: MarketplacePluginDetail = {
   featured: false,
   updatedAt: "2026-09-30T00:00:00.000Z",
   shareUrl: "https://openbot.run/plugins/sentry",
+};
+
+const VERCEL: MarketplacePluginDetail = {
+  id: "plugin-vercel",
+  slug: "vercel",
+  name: "Vercel",
+  tagline: "Deployments, build logs and projects",
+  description:
+    "Vercel lets agents list projects and recent deployments, read build and runtime logs, and find why a build failed. Each user signs in to their own Vercel account through the browser and chooses the teams that agents can use. In those teams, agents get the same rights as the user's account. They can also change environment variables, domains, DNS records and deployments, and buy domains.",
+  category: "coding",
+  creatorName: "vercel.com",
+  iconUrl: "https://vercel.com/favicon.ico",
+  version: "1.0.0",
+  prompts: [
+    { id: "prompt-failed-build", text: "Why did the last production deployment fail?" },
+    { id: "prompt-recent-deployments", text: "List the deployments from today and their status." },
+    { id: "prompt-runtime-errors", text: "Which routes had runtime errors in the last hour?" },
+  ],
+  apps: [
+    {
+      id: "app-vercel-mcp",
+      name: "Vercel",
+      description:
+        "Projects, deployments, build logs, and runtime logs, over Vercel's MCP server with browser sign-in.",
+      iconUrl: "https://vercel.com/favicon.ico",
+      server: {
+        name: "vercel",
+        transport: "http",
+        url: "https://mcp.vercel.com",
+        auth: [{ id: "vercel-oauth", kind: "link", label: "Sign in" }],
+      },
+    },
+  ],
+  websiteUrl: "https://vercel.com",
+  privacyPolicyUrl: "https://vercel.com/legal/privacy-notice",
+  termsUrl: "https://vercel.com/legal/terms",
+  skills: [],
+  installs: 0,
+  featured: false,
+  updatedAt: "2026-09-30T00:00:00.000Z",
+  shareUrl: "https://openbot.run/plugins/vercel",
 };
 
 const CONTEXT7: MarketplacePluginDetail = {
@@ -744,9 +825,11 @@ export const MARKETPLACE_PLUGINS: MarketplacePluginDetail[] = [
   CANVA,
   LINEAR,
   NOTION,
+  COBRAIN,
   FIGMA,
   PAPER,
   SENTRY,
+  VERCEL,
   CONTEXT7,
   STRIPE,
   POSTHOG,

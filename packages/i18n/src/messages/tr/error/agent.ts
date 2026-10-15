@@ -2,10 +2,14 @@ import type { PartialTranslation } from "../../../message";
 import type { messages as source } from "../../en/error/agent";
 
 export const messages = {
+  "error.agent.historyUnavailable": "Bu istek için geçmiş kullanılamıyor. Son geçmişi tekrar okuyun.",
+  "error.agent.toolRequestInvalid":
+    "Geçersiz araç keşfi bağımsız değişkenleri. Bildirilen şemayı ve özgün nitelikli araç adını kullanın.",
   // Agent errors that the main process and the backend send.
   "error.agent.approvalWhileDeleting": "Ajan silinirken onay verilemez.",
   "error.agent.accessLocalOnly": "Ajan erişimi yalnızca ajanı çalıştıran bilgisayarda değiştirilebilir.",
   "error.agent.duplicateCleanupFailed": "Ajan kopyalama başarısız oldu ve tamamlanmamış kopya kaldırılamadı.",
+  "error.agent.commitEffectsFailed": "İşlem kaydedildi, ancak kaydedilen etkileri başarısız oldu.",
   "error.agent.settingsLocalOnly": "Ajan ayarları yalnızca ajanı çalıştıran bilgisayarda değiştirilebilir.",
   "error.agent.skillsLocalOnly": "Beceriler yalnızca ajanı çalıştıran bilgisayarda değiştirilebilir.",
   "error.agent.addLocalOnly": "Ajanlar yalnızca onları çalıştıran bilgisayarda eklenebilir.",
@@ -20,6 +24,13 @@ export const messages = {
   "error.agent.initialMessageTooLong": "İlk mesaj çok uzun.",
   "error.agent.setupCleanupFailed": "Ajan kurulumu başarısız oldu ve tamamlanmamış ajan kaldırılamadı.",
   "error.agent.modelUnavailable": "Seçilen ajan modeli kullanılamıyor.",
+  "error.agent.modelProviderNotConnected": 'Seçilen ajan modeli "{model}" kullanılamıyor: {provider} bağlı değil.',
+  "error.agent.modelListEmpty":
+    'Seçilen ajan modeli "{model}" kullanılamıyor: {provider} hiç model listelemedi. Son hata: {detail}',
+  "error.agent.modelListEmptyNoError":
+    'Seçilen ajan modeli "{model}" kullanılamıyor: {provider} hiç model listelemedi.',
+  "error.agent.modelNotInProviderList":
+    'Seçilen ajan modeli "{model}" kullanılamıyor: {provider} bu modeli listelemiyor.',
   "error.agent.modelProviderMismatch": "Seçilen model o sağlayıcıya ait değil.",
   "error.agent.modelNotListed": '"{model}" modeli mevcut değil. Kullanılabilir modeller: {models}.',
   "error.agent.providerNotListed":
@@ -74,6 +85,10 @@ export const messages = {
   "error.agent.automationLocalOnly": "Yerel betiklere yalnızca ajanı çalıştıran bilgisayarda izin verilebilir.",
   "error.agent.busyMessageModeLocalOnly":
     "Ajan çalışırken mesajların ne yapacağı yalnızca ajanı çalıştıran bilgisayarda ayarlanabilir.",
+  "error.agent.backupModelsLocalOnly": "Yedek modeller yalnızca ajanı çalıştıran bilgisayarda ayarlanabilir.",
+  "error.agent.localScriptsOff": "Bu ajan yerel betiklere izin vermiyor.",
+  "error.agent.localScriptsRateLimited":
+    "Yerel betikler son bir saatte bu ajana {limit} mesaj veya rutin isteği gönderdi. Daha sonra tekrar deneyin.",
   "error.agent.automationOff": "Bu ajan, yerel betiklerin rutinlerini çalıştırmasına izin vermiyor.",
   "error.agent.automationPayloadTooLong": "Veri yükü {limit} karakterden daha uzun.",
   "error.agent.automationRateLimited":
@@ -82,6 +97,8 @@ export const messages = {
     "Yalnızca çalışma alanı bu sağlayıcı için yalnızca macOS'ta kullanılabilir. Ajan ayarlarından Tam erişim'i seçin.",
   "error.agent.lowMemory":
     "Bu sunucunun belleği azaldı. Mesajınız kuyrukta bekler ve bellek boşaldığında başlar. Daha büyük bir plan sunucuya daha fazla bellek sağlar.",
+  "error.agent.lowMemoryServer":
+    "Bu sunucunun belleği azaldı. Mesajınız kuyrukta bekler ve bellek boşaldığında başlar.",
   "error.agent.workspaceOnlyToolMissing":
     "Yalnızca çalışma alanı OpenBot'un bulamadığı {tool} aracına ihtiyaç duyar. Aracı yükleyin veya ajan ayarlarından Tam erişim'i seçin.",
 } as const satisfies PartialTranslation<typeof source>;

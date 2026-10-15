@@ -2,6 +2,14 @@ import type { PartialTranslation } from "../../message";
 import type { messages as source } from "../en/agentSettings";
 
 export const messages = {
+  "agentSettings.session.title": "プロバイダーの設定",
+  "agentSettings.session.readFailed": "プロバイダーの設定を読み取れませんでした。",
+  "agentSettings.session.pending": "保存した変更は次のターンの前に適用されます。",
+  "agentSettings.session.unavailable":
+    "保存された値 {value} は利用できません。別の値を選択するか、リセットしてください。",
+  "agentSettings.session.effective": "現在のプロバイダーの値: {value}",
+  "agentSettings.session.reset": "設定をリセット",
+  "agentSettings.session.resetNamed": "{name} をリセット",
   "agentSettings.label": "エージェントの設定",
   "agentSettings.title": "設定",
   "agentSettings.backToDetails": "詳細に戻る",
@@ -9,6 +17,26 @@ export const messages = {
   "agentSettings.backToSettings": "設定に戻る",
   "agentSettings.permissions.title": "権限",
   "agentSettings.advanced.title": "詳細設定",
+  "agentSettings.backupModels.title": "バックアップモデル",
+  "agentSettings.backupModels.valueAsk": "先に確認",
+  "agentSettings.backupModels.valueAutomatic": "自動",
+  "agentSettings.backupModels.valueCount": { other: "{mode} · {count}" },
+  "agentSettings.backupModels.intro":
+    "{name} が書き始める前に {model} が使用量の上限に達した場合、{name} はどのモデルを使うかを確認します。",
+  "agentSettings.backupModels.introAutomatic":
+    "{name} が書き始める前に {model} が使用量の上限に達した場合、{name} は順番の中で最初に使えるモデルに切り替えます。",
+  "agentSettings.backupModels.ask": "切り替える前に確認",
+  "agentSettings.backupModels.order": "順番",
+  "agentSettings.backupModels.listLabel": "バックアップモデル（順番）",
+  "agentSettings.backupModels.empty": "順番は設定されていません。{name} は使えるモデルをすべて表示します。",
+  "agentSettings.backupModels.add": "バックアップモデルを追加",
+  "agentSettings.backupModels.moveUp": "{model} を上へ移動",
+  "agentSettings.backupModels.moveDown": "{model} を下へ移動",
+  "agentSettings.backupModels.remove": "{model} を削除",
+  "agentSettings.backupModels.limited": "使用量の上限に達しました · スキップ",
+  "agentSettings.backupModels.unavailable": "現在使用できません · スキップ",
+  "agentSettings.backupModels.withAccount": "{model} · {account}",
+  "agentSettings.backupModels.note": "{name} は書き始めた後は切り替えません。上限が解除されると {model} に戻ります。",
   "agentSettings.groups.brain": "頭脳",
   "agentSettings.groups.knows": "知識",
   "agentSettings.groups.does": "実行",
@@ -110,6 +138,9 @@ export const messages = {
     "Computer Use と OpenBot ブラウザーは制限されません。Computer Use は下でオフにできます。",
   "agentSettings.computerUse.title": "Computer Use",
   "agentSettings.computerUse.description": "このエージェントにこのコンピューターのアプリの操作を許可します",
+  "agentSettings.automation.title": "ローカルスクリプト",
+  "agentSettings.automation.description":
+    "ホスト上のスクリプトが、メッセージの送信、ルーティンの実行、質問への回答、承認の許可や拒否を行えるようにします",
   "agentSettings.runtime.workspaceEnforcedProcess":
     "{provider} のプロセス全体がサンドボックス内で実行されるため、外部への書き込みは失敗します。macOS でのみ利用できます。",
 } as const satisfies PartialTranslation<typeof source>;

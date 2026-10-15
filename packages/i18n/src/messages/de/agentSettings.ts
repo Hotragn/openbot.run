@@ -2,6 +2,14 @@ import type { PartialTranslation } from "../../message";
 import type { messages as source } from "../en/agentSettings";
 
 export const messages = {
+  "agentSettings.session.title": "Anbietereinstellungen",
+  "agentSettings.session.readFailed": "Die Anbietereinstellungen konnten nicht gelesen werden.",
+  "agentSettings.session.pending": "Gespeicherte Änderungen gelten vor dem nächsten Durchgang.",
+  "agentSettings.session.unavailable":
+    "Der gespeicherte Wert {value} ist nicht verfügbar. Wähle einen anderen Wert oder setze ihn zurück.",
+  "agentSettings.session.effective": "Aktueller Wert des Anbieters: {value}",
+  "agentSettings.session.reset": "Einstellung zurücksetzen",
+  "agentSettings.session.resetNamed": "{name} zurücksetzen",
   "agentSettings.label": "Agenteneinstellungen",
   "agentSettings.title": "Einstellungen",
   "agentSettings.backToDetails": "Zurück zu den Details",
@@ -9,6 +17,27 @@ export const messages = {
   "agentSettings.backToSettings": "Zurück zu den Einstellungen",
   "agentSettings.permissions.title": "Berechtigungen",
   "agentSettings.advanced.title": "Erweitert",
+  "agentSettings.backupModels.title": "Ersatzmodelle",
+  "agentSettings.backupModels.valueAsk": "Erst fragen",
+  "agentSettings.backupModels.valueAutomatic": "Automatisch",
+  "agentSettings.backupModels.valueCount": { one: "{mode} · {count}", other: "{mode} · {count}" },
+  "agentSettings.backupModels.intro":
+    "Wenn {model} sein Nutzungslimit erreicht, bevor {name} zu schreiben beginnt, fragt {name} dich, welches Modell verwendet werden soll.",
+  "agentSettings.backupModels.introAutomatic":
+    "Wenn {model} sein Nutzungslimit erreicht, bevor {name} zu schreiben beginnt, wechselt {name} zum ersten verfügbaren Modell in der Reihenfolge.",
+  "agentSettings.backupModels.ask": "Vor dem Wechsel fragen",
+  "agentSettings.backupModels.order": "Reihenfolge",
+  "agentSettings.backupModels.listLabel": "Ersatzmodelle in Reihenfolge",
+  "agentSettings.backupModels.empty": "Keine Reihenfolge festgelegt. {name} bietet jedes verfügbare Modell an.",
+  "agentSettings.backupModels.add": "Ersatzmodell hinzufügen",
+  "agentSettings.backupModels.moveUp": "{model} nach oben",
+  "agentSettings.backupModels.moveDown": "{model} nach unten",
+  "agentSettings.backupModels.remove": "{model} entfernen",
+  "agentSettings.backupModels.limited": "Nutzungslimit erreicht · übersprungen",
+  "agentSettings.backupModels.unavailable": "Gerade nicht verfügbar · übersprungen",
+  "agentSettings.backupModels.withAccount": "{model} · {account}",
+  "agentSettings.backupModels.note":
+    "{name} wechselt nie, nachdem es zu schreiben begonnen hat. Es kehrt zu {model} zurück, wenn das Limit endet.",
   "agentSettings.groups.brain": "Gehirn",
   "agentSettings.groups.knows": "Wissen",
   "agentSettings.groups.does": "Aufgaben",

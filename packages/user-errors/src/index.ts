@@ -5,6 +5,9 @@ import {
   type TranslatedLocale,
 } from "@openbot/i18n/source";
 import { redactText } from "@openbot/logging";
+import { errnoCode, errorReference, NETWORK_MESSAGE, normalizeMessage } from "./reference";
+
+export { errorReference, referenceCarrierName, referenceFrom, safeReference } from "./reference";
 
 /**
  * What went wrong, in the terms a recovery affordance needs.
@@ -51,9 +54,6 @@ const NETWORK_CODES = [
   "ERR_INTERNET_DISCONNECTED",
 ];
 
-const NETWORK_MESSAGE =
-  /^(?:TypeError: )?(?:Failed to fetch|fetch failed|Network request failed|Load failed|NetworkError when attempting to fetch resource\.)$/iu;
-
 /**
  * Authentication signals that appear inside a longer sentence rather than at its start.
  *
@@ -61,34 +61,18 @@ const NETWORK_MESSAGE =
  * in the middle: `failed to fetch codex rate limits: GET https://… failed: 401 Unauthorized; body={
  * "error": { "message": "Could not parse your authentication token…" } }`. The anchored status rules
  * below cannot see that, and without this set the whole exchange - URL, headers and body - was
- * printed to the user verbatim.
+ * printed to the user verbatim. Codex also reports an expired sign-in as `workspace routing
+ * discovery unauthorized (401)`, with the code after the word.
  *
  * Bare `401` is deliberately not a signal: it matches ports, byte counts and IDs. Every entry here
  * pairs the code with a word that only an authentication failure uses.
  */
 const AUTH_SIGNALS =
-  /\b401\s+unauthorized\b|\bhttp\s*401\b|"status"\s*:\s*401\b|\bunauthorized_unknown\b|could not parse your authentication token|please try signing in again|\binvalid_api_key\b|\bnot authenticated\b/iu;
+  /\b401\s+unauthorized\b|\bunauthorized\s*\(\s*401\s*\)|\bhttp\s*401\b|"status"\s*:\s*401\b|\bunauthorized_unknown\b|could not parse your authentication token|please try signing in again|\binvalid_api_key\b|\bnot authenticated\b/iu;
 
 /** Runtime output, stack traces, paths and serialized objects: never shown, whatever the kind. */
 const TECHNICAL_OUTPUT =
   /(?:\bSQLITE_\w+|\bERR_\w+|^E[A-Z_]+:|^Command failed|^spawn |\n\s*at |\[object Object\]|^\s*[<{[]|\/(?:Users|home|tmp|private|var|etc|usr)\/|[A-Za-z]:\\)/u;
-
-/**
- * What Electron and the error classes put in front of a message: `Error invoking remote method
- * 'x': RemoteRequestError: …`. A built-in `TypeError:` and the like stays, because it marks runtime
- * output that is never shown.
- */
-const MESSAGE_PREFIX =
-  /^(?:(?:Error invoking remote method '[^']+':|(?!(?:Type|Syntax|Reference|Range)Error:)(?:[A-Z]\w*)?Error:)\s*)+/u;
-
-function normalizeMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  return raw.trim().replace(MESSAGE_PREFIX, "");
-}
-
-function errnoCode(message: string): string | undefined {
-  return message.match(/^(?:[a-z]+\s+)?(E[A-Z_]+)(?=[:\s]|$)/u)?.[1];
-}
 
 /**
  * Decide what kind of failure this is. Use it to choose a recovery affordance; use
@@ -146,4 +130,15 @@ export function userErrorMessage(error: unknown, fallback: string, locale: Trans
     return fallback;
   }
   return redactText(localizeSourceText(message, locale));
+}
+
+/** What a screen shows for a failure: the sentence and the code a user can copy. */
+export interface UserErrorDetails {
+  message: string;
+  reference: string | null;
+}
+
+/** {@link userErrorMessage} with the failure's {@link errorReference}. */
+export function userErrorDetails(error: unknown, fallback: string, locale: TranslatedLocale = "en"): UserErrorDetails {
+  return { message: userErrorMessage(error, fallback, locale), reference: errorReference(error) };
 }

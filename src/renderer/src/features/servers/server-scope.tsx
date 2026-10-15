@@ -1,4 +1,6 @@
 import { createRemoteConnectionRecovery, type RemoteRecoveryStatus } from "@openbot/team-client/remote-recovery";
+import { currentText } from "@openbot/ui/text";
+import type { UserErrorDetails } from "@openbot/user-errors";
 import { createEffect, createSignal, createStore, flush, getOwner, isDisposed, onSettled, untrack } from "solid-js";
 import { isGlobalSearchShortcut } from "../../global-search-shortcut";
 import { useNavigation } from "../../navigation";
@@ -71,6 +73,8 @@ const ServerScope = createSimpleContext({
       loading: boolean;
       sequence: number | undefined;
       failed: boolean;
+      /** Why the last load failed, for the connection notice. Null when `failed` is false. */
+      failure: UserErrorDetails | null;
       panelsFailed: boolean;
       panelsLoading: boolean;
       recovery: RemoteRecoveryStatus;
@@ -79,6 +83,7 @@ const ServerScope = createSimpleContext({
       loading: true,
       sequence: undefined,
       failed: false,
+      failure: null,
       panelsFailed: false,
       panelsLoading: false,
       recovery: { phase: "connecting", attempt: 0, remainingSeconds: 0 },
@@ -93,12 +98,15 @@ const ServerScope = createSimpleContext({
       transportReady();
     const recovery = createRemoteConnectionRecovery(
       loadWorkspace,
-      () => {
-        if (scopeIsCurrent())
-          setConnection((draft) => {
-            draft.failed = true;
-            draft.loading = false;
-          });
+      (error) => {
+        if (!scopeIsCurrent()) return;
+        const text = currentText();
+        const failure = text.errorDetails(error, text.t("server.connection.failedDescription"));
+        setConnection((draft) => {
+          draft.failed = true;
+          draft.failure = failure;
+          draft.loading = false;
+        });
       },
       (status) => {
         if (scopeIsCurrent())
@@ -122,8 +130,12 @@ const ServerScope = createSimpleContext({
       if (!isCurrent() || !transportReady()) return;
       setConnection((draft) => {
         draft.failed = false;
+        draft.failure = null;
         draft.loading = true;
       });
+      // The panels do not wait for the agents: a starting host answers its layout at once but holds the
+      // agent list until its agents load, and agents shown before their sections show ungrouped.
+      void loadPanels();
       const [status, models, agents, reads] = await Promise.all([
         serversPort().agent.getStatus(serverId),
         serversPort().agent.listModels(serverId),
@@ -143,7 +155,6 @@ const ServerScope = createSimpleContext({
         draft.loading = false;
         draft.sequence = sequence;
       });
-      void loadPanels();
       void serversPort()
         .servers.getPresence()
         .then((value) => {
@@ -156,8 +167,10 @@ const ServerScope = createSimpleContext({
 
     async function loadPanels() {
       const generation = loadGeneration;
-      const isCurrent = () => scopeIsCurrent() && generation === loadGeneration;
       const server = selectedServer();
+      const sequence = server?.connectionSequence;
+      const isCurrent = () =>
+        scopeIsCurrent() && generation === loadGeneration && sequence === selectedServer()?.connectionSequence;
       setConnection((draft) => {
         draft.panelsFailed = false;
         draft.panelsLoading = true;
@@ -171,7 +184,9 @@ const ServerScope = createSimpleContext({
       const reads = [
         loadSidebarLayout(server)
           .then((value) => {
-            if (isCurrent()) setSidebarLayout(value);
+            // A layout event can land while this read is in flight. The newer revision stays.
+            if (value && isCurrent())
+              setSidebarLayout((current) => (value.revision >= current.revision ? value : current));
           })
           .catch(failed),
       ];

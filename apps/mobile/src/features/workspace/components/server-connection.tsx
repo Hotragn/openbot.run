@@ -2,15 +2,18 @@ import type { AgentEvent, TeamRealtimeEvent } from "@openbot/contracts/ipc";
 import { sourceText } from "@openbot/i18n/source";
 import {
   createRemoteConnectionRecovery,
+  type RemoteConnectionFailure,
   type RemoteConnectionStage,
   type RemoteRecoveryStatus,
   type RemoteTeamDirectoryClient,
-  remoteConnectionFailure,
+  remoteConnectionFailureDetails,
 } from "@openbot/team-client";
+import { REMOTE_PEER_LOST_AFTER_MS } from "@openbot/team-client/remote-peer";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MobileConnectionAnalytics } from "@/features/analytics/connection";
 import { mobileAnalytics } from "@/features/analytics/mobile-analytics";
 import { supportLog, supportLogValue } from "@/features/support/model/support-log";
+import { referencedError } from "@/features/workspace/model/referenced-error";
 import { RemoteTeamTransport, type RemoteTeamTransportRef } from "./remote-team-transport";
 
 export interface ServerConnectionHandle {
@@ -30,7 +33,7 @@ interface Props {
   directory: RemoteTeamDirectoryClient;
   register(hostId: string, handle: ServerConnectionHandle | null): void;
   load(hostId: string, publicKey: string, client: RemoteTeamTransportRef, context: ServerLoadContext): Promise<void>;
-  onStatus(hostId: string, status: RemoteRecoveryStatus, failure: string | null): void;
+  onStatus(hostId: string, status: RemoteRecoveryStatus, failure: RemoteConnectionFailure | null): void;
   onMembershipChanged?(): Promise<void>;
   onTeamEvent(hostId: string, event: AgentEvent | TeamRealtimeEvent): void;
 }
@@ -54,12 +57,14 @@ export function ServerConnection({
   const generation = useRef(0);
   const [analytics] = useState(() => new MobileConnectionAnalytics(mobileAnalytics));
   const membershipRefreshPending = useRef(false);
+  /** When this connection last became inactive, such as when the app went to the background. */
+  const inactiveSince = useRef<number | null>(null);
   const attach = useCallback((value: RemoteTeamTransportRef | null) => setClient(value), []);
 
   useEffect(() => {
     if (!client) return;
     let disposed = false;
-    let failure: string | null = null;
+    let failure: RemoteConnectionFailure | null = null;
     let loggedStatus = "";
     let context: ServerLoadContext = { stage: "connection", isCurrent: () => false };
     const recovery = createRemoteConnectionRecovery(
@@ -90,7 +95,7 @@ export function ServerConnection({
         );
       },
       (error) => {
-        failure = remoteConnectionFailure(context.stage, error);
+        failure = remoteConnectionFailureDetails(context.stage, error);
       },
       (status) => {
         if (disposed) return;
@@ -124,6 +129,12 @@ export function ServerConnection({
     if (!active) {
       generation.current += 1;
       analytics.background();
+      inactiveSince.current ??= Date.now();
+    } else if (inactiveSince.current !== null) {
+      // After this long the peer replaces its connection when it becomes active, so the first attempt
+      // shows that it connects instead of an online server whose requests fail.
+      if (Date.now() - inactiveSince.current >= REMOTE_PEER_LOST_AFTER_MS) controller.current?.offline();
+      inactiveSince.current = null;
     }
     controller.current?.setActive(active);
     if (active && membershipRefreshPending.current) {
@@ -156,7 +167,7 @@ export function ServerConnection({
             if (activeRef.current) void onMembershipChanged?.().catch(() => undefined);
             else membershipRefreshPending.current = true;
           }
-          const error = new Error(update.message ?? sourceText("error.remote.desktopOffline"));
+          const error = referencedError(update.message ?? sourceText("error.remote.desktopOffline"), update.reference);
           if (update.code === "protocol_error") controller.current?.suspend(error);
           else controller.current?.offline(error);
         }

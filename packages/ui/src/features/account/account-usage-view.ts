@@ -6,21 +6,38 @@ import {
   accountUsageCoversModel,
   agentProviderDescriptor,
   agentProviderName,
+  DEFAULT_PROVIDER_ACCOUNT_ID,
   isAgentProvider,
+  type ProviderAccountStatus,
 } from "@openbot/contracts/ipc";
+import { providerAccountName } from "../../components/provider-accounts";
 import { currentText, type TextValue } from "../../text";
 
 type UsageText = Pick<TextValue, "t" | "format">;
 
 export type AccountUsageTone = "neutral" | "warning" | "critical";
 
+/** One limit window that a provider reported, such as its 5-hour or its weekly window. */
+export interface AccountUsageWindowRow {
+  label: string;
+  remainingPercent: number;
+  tone: AccountUsageTone;
+  /** Unix seconds. */
+  resetsAt: number | null;
+  resetsAtLabel: string | null;
+}
+
 export interface AccountUsageProviderRow {
   provider: AgentProviderId;
+  /** The account after the first that the reading is for. Null for the provider's own sign-in. */
+  accountId: string | null;
+  /** The provider, and the account when the provider has more than one. */
   name: string;
+  /** The window that stops work first. The dock chip shows it. */
   remainingPercent: number | null;
-  windowLabel: string | null;
-  resetsAtLabel: string | null;
   tone: AccountUsageTone;
+  /** Every reported window, the shortest first, so a weekly limit does not hide the 5-hour one. */
+  windows: AccountUsageWindowRow[];
   /** `false` for a provider that has no usage reading, so a missing amount is not a failure. */
   reportsUsage: boolean;
 }
@@ -36,60 +53,100 @@ export function usageTone(remainingPercent: number | null): AccountUsageTone {
 }
 
 /**
- * One row per connected provider. A limit the provider reported fills the remaining amount; an
- * available provider with no reading still appears, so the dock does not hide Claude or Grok.
+ * One row per connected provider account. A limit the provider reported fills the remaining amount;
+ * an available provider with no reading still appears, so the dock does not hide Claude or Grok.
  */
 export function accountUsageProviderRows(
   usage: AccountUsage | null,
-  providers?: ReadonlyArray<{ id: string; state: string }>,
+  providers?: ReadonlyArray<{ id: string; state: string; accounts?: readonly ProviderAccountStatus[] | undefined }>,
   text: UsageText = currentText(),
 ): AccountUsageProviderRow[] {
-  const rows = new Map<AgentProviderId, AccountUsageProviderRow>();
+  const accountsOf = (provider: AgentProviderId) => {
+    const accounts = providers?.find((candidate) => candidate.id === provider)?.accounts ?? [];
+    return accounts.length > 1 ? accounts : [];
+  };
+  const rows = new Map<string, AccountUsageProviderRow>();
   for (const limit of usage?.limits ?? []) {
     if (!isAgentProvider(limit.id)) continue;
-    rows.set(limit.id, usageRow(limit.id, limit, text));
+    const accountId = limit.accountId ?? null;
+    rows.set(usageRowKey(limit.id, accountId), usageRow(limit.id, accountId, accountsOf(limit.id), limit, text));
   }
   for (const provider of providers ?? []) {
-    if (!isAgentProvider(provider.id) || provider.state !== "available" || rows.has(provider.id)) continue;
-    if (provider.id === "opencode") continue;
-    rows.set(provider.id, usageRow(provider.id, null, text));
+    if (!isAgentProvider(provider.id) || provider.state !== "available" || provider.id === "opencode") continue;
+    const accounts = accountsOf(provider.id);
+    const ids = accounts.length
+      ? accounts.flatMap((account) =>
+          account.id === DEFAULT_PROVIDER_ACCOUNT_ID ? [null] : account.state === "connected" ? [account.id] : [],
+        )
+      : [null];
+    for (const accountId of ids) {
+      if (!rows.has(usageRowKey(provider.id, accountId)))
+        rows.set(usageRowKey(provider.id, accountId), usageRow(provider.id, accountId, accounts, null, text));
+    }
   }
+  const accountOrder = (row: AccountUsageProviderRow) =>
+    accountsOf(row.provider).findIndex((account) => account.id === (row.accountId ?? DEFAULT_PROVIDER_ACCOUNT_ID));
   return [...rows.values()].sort(
     (left, right) =>
-      agentProviderDescriptor(left.provider).pickerOrder - agentProviderDescriptor(right.provider).pickerOrder,
+      agentProviderDescriptor(left.provider).pickerOrder - agentProviderDescriptor(right.provider).pickerOrder ||
+      accountOrder(left) - accountOrder(right),
   );
+}
+
+function usageRowKey(provider: AgentProviderId, accountId: string | null): string {
+  return `${provider}\u0000${accountId ?? ""}`;
 }
 
 function usageRow(
   provider: AgentProviderId,
+  accountId: string | null,
+  accounts: readonly ProviderAccountStatus[],
   limit: AccountUsageLimit | null,
   text: UsageText,
 ): AccountUsageProviderRow {
-  const window = limit ? mostConstrainedWindow(limit) : null;
-  const remainingPercent = window ? usageRemainingPercent(window.usedPercent) : null;
+  const windows = (limit ? reportedWindows(limit) : []).map((window): AccountUsageWindowRow => {
+    const remainingPercent = usageRemainingPercent(window.usedPercent);
+    return {
+      label: usageWindowLabel(window.windowDurationMins, text),
+      remainingPercent,
+      tone: usageTone(remainingPercent),
+      resetsAt: window.resetsAt,
+      resetsAtLabel: formatUsageReset(window.resetsAt, text),
+    };
+  });
+  // The shortest window comes first, so on a tie the shorter window stops work first.
+  const binding = windows.reduce<AccountUsageWindowRow | null>(
+    (lowest, window) => (lowest === null || window.remainingPercent < lowest.remainingPercent ? window : lowest),
+    null,
+  );
+  const remainingPercent = binding?.remainingPercent ?? null;
   return {
     provider,
-    name: agentProviderName(provider),
+    accountId,
+    name: accounts.length
+      ? `${agentProviderName(provider)} · ${providerAccountName(text.t, accounts, accountId ?? DEFAULT_PROVIDER_ACCOUNT_ID)}`
+      : agentProviderName(provider),
     remainingPercent,
-    windowLabel: window ? usageWindowLabel(window.windowDurationMins, text) : null,
-    resetsAtLabel: window ? formatUsageReset(window.resetsAt, text) : null,
     tone: usageTone(remainingPercent),
+    windows,
     reportsUsage: agentProviderDescriptor(provider).reportsUsage,
   };
 }
 
 /**
- * The row the dock chip shows. With an active agent it is that agent's provider only, so a spent
- * Grok quota does not show as the limit of a ChatGPT agent. With no agent it is the lowest row.
+ * The row the dock chip shows. With an active agent it is that agent's provider account only, so a
+ * spent Grok quota does not show as the limit of a ChatGPT agent. With no agent it is the lowest row.
  */
 export function accountUsageSummary(
   rows: AccountUsageProviderRow[],
   provider?: AgentProviderId | null,
   model?: string | null,
+  accountId?: string | null,
 ): AccountUsageProviderRow | null {
   if (provider) {
     if (!accountUsageCoversModel(provider, model)) return null;
-    return rows.find((row) => row.provider === provider) ?? null;
+    const rowsOfProvider = rows.filter((row) => row.provider === provider);
+    return rowsOfProvider.find((row) => row.accountId === (accountId ?? null)) ?? rowsOfProvider[0] ?? null;
   }
   let lowest: AccountUsageProviderRow | null = null;
   for (const row of rows) {
@@ -126,6 +183,25 @@ export function formatUsageReset(resetsAt: number | null, text: UsageText = curr
   });
 }
 
+/** Time until a window resets, in short units: "38m", "1h 12m", "5d 2h". */
+export function formatUsageResetIn(
+  resetsAt: number | null,
+  nowMs: number,
+  text: UsageText = currentText(),
+): string | null {
+  if (resetsAt === null) return null;
+  const remainingMs = resetsAt * 1_000 - nowMs;
+  // A past reset means the reading is stale until the next refresh; show no countdown.
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
+  const totalMinutes = Math.ceil(remainingMs / 60_000);
+  const days = Math.floor(totalMinutes / 1_440);
+  const hours = Math.floor((totalMinutes % 1_440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return text.t("account.usage.resetIn.days", { days, hours });
+  if (hours > 0) return text.t("account.usage.resetIn.hours", { hours, minutes });
+  return text.t("account.usage.resetIn.minutes", { minutes });
+}
+
 export function accountUsageRowLabel(
   row: AccountUsageProviderRow,
   text: UsageText = currentText(),
@@ -135,21 +211,21 @@ export function accountUsageRowLabel(
   if (!row.reportsUsage) return t("account.usage.row.notReported", { name: row.name });
   if (row.remainingPercent === null)
     return t(loading ? "account.usage.row.loading" : "account.usage.row.unavailable", { name: row.name });
-  const parts = [t("account.usage.row.left", { name: row.name, percent: row.remainingPercent })];
-  if (row.windowLabel) parts.push(row.windowLabel);
-  if (row.resetsAtLabel) parts.push(t("account.usage.row.resets", { time: row.resetsAtLabel }));
+  const parts = [row.name];
+  for (const window of row.windows) {
+    parts.push(t("account.usage.row.window", { window: window.label, percent: window.remainingPercent }));
+    if (window.resetsAtLabel) parts.push(t("account.usage.row.resets", { time: window.resetsAtLabel }));
+  }
   return parts.join(", ");
 }
 
-function mostConstrainedWindow(limit: AccountUsageLimit): AccountUsageWindow | null {
-  const windows = [limit.primary, limit.secondary].filter((window): window is AccountUsageWindow => window !== null);
-  if (windows.length === 0) return null;
-  return windows.reduce((worst, window) => {
-    if (window.usedPercent !== worst.usedPercent) return window.usedPercent > worst.usedPercent ? window : worst;
-    const windowMins = window.windowDurationMins ?? Number.POSITIVE_INFINITY;
-    const worstMins = worst.windowDurationMins ?? Number.POSITIVE_INFINITY;
-    return windowMins < worstMins ? window : worst;
-  });
+function reportedWindows(limit: AccountUsageLimit): AccountUsageWindow[] {
+  return [limit.primary, limit.secondary]
+    .filter((window): window is AccountUsageWindow => window !== null)
+    .sort(
+      (left, right) =>
+        (left.windowDurationMins ?? Number.POSITIVE_INFINITY) - (right.windowDurationMins ?? Number.POSITIVE_INFINITY),
+    );
 }
 
 function nearDuration(durationMins: number, targetMins: number): boolean {

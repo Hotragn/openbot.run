@@ -21,6 +21,7 @@ import type { FailureSignal } from "../backend/agent/failure-signal";
 import type { ToolUsageSignal } from "../backend/agent/thread-items";
 import type { BrowserSiteVisit } from "../backend/browser-host";
 import { type AnalyticsOperationFailure, analyticsIO, analyticsSync } from "./analytics-effects";
+import { localDay, RESOURCE_ENUMS, RESOURCE_PROPERTY_NAMES, type ResourceProperties } from "./resource-summary";
 
 const OPENPANEL_API_URL = "https://analytics.openbot.run/api";
 const OPENPANEL_CLIENT_ID = "6c989975-87ef-4f0c-857e-ab449a65b5c2";
@@ -40,7 +41,7 @@ const MAX_TOOL_ROWS_PER_TURN = 32;
 const MAX_SITE_TABS = 1_000;
 const MAX_ROUTINE_RUNS = 10_000;
 const MAX_INVENTORY_ITEMS = 32;
-const ANALYTICS_SCHEMA_VERSION = 7;
+const ANALYTICS_SCHEMA_VERSION = 8;
 const CURATED_AGENT_PREFIX = "openbot-curated-agent-";
 const LISTING_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/u;
@@ -75,6 +76,7 @@ const ROUTINE_TRIGGER_TYPES = [
   "interval",
   "advanced",
   "custom",
+  "once",
 ] as const;
 
 type AnalyticsIdentity = Pick<CentralAuthUser, "id" | "email">;
@@ -90,6 +92,7 @@ type HostEventName =
   | "system_site_visited"
   | "system_routine_run"
   | "system_inventory"
+  | "system_resources"
   | "hosted_site_action";
 export type HostOpenPanelClient = Pick<OpenPanelBase, "setGlobalProperties" | "track" | "identify" | "clear">;
 type ClientFactory = (options: OpenPanelOptions) => HostOpenPanelClient;
@@ -103,6 +106,8 @@ function createOpenPanelClient(options: OpenPanelOptions): HostOpenPanelClient {
 export interface HostAnalyticsOptions {
   reports?: ReportQueue;
   enabled: boolean;
+  /** The OpenPanel API. Production when omitted; a dev capture server in `analytics-redaction-e2e`. */
+  apiUrl?: string;
   trackingEnabled?: boolean;
   appVersion: string;
   platform: "darwin" | "win32" | "linux";
@@ -116,6 +121,15 @@ export interface HostAnalyticsOptions {
   resolveRoutineRun?: (agentId: string, routineId: string, runId: string) => AnalyticsRoutineRun | null;
   resolveInventory?: () => Effect.Effect<AnalyticsInventory, AnalyticsOperationFailure>;
   inventoryDay?: AnalyticsInventoryDayStore;
+  resources?: AnalyticsResourceSource;
+}
+
+/** The resource summary of the last closed local day, which the resource monitor keeps. */
+export interface AnalyticsResourceSource {
+  /** `null` when no closed day waits to be sent. */
+  previousDay(): { day: string; properties: ResourceProperties } | null;
+  /** Removes that day and saves the file. Analytics calls it before the send, or to drop the day. */
+  clearPreviousDay(day: string): Effect.Effect<void, AnalyticsOperationFailure>;
 }
 
 interface AnalyticsRoutineRun {
@@ -124,7 +138,7 @@ interface AnalyticsRoutineRun {
 }
 
 /** Counts and closed-set names only: never a user-authored name, URL or command. */
-export interface AnalyticsInventory {
+interface AnalyticsInventory {
   agentCount: number;
   enabledRoutineCount: number;
   customMcpServerCount: number;
@@ -181,6 +195,7 @@ const HOST_ALLOWLIST = {
     "providers",
     "computer_use_enabled",
   ],
+  system_resources: RESOURCE_PROPERTY_NAMES,
   hosted_site_action: ["action", "entry_point", "result", "failure_code"],
 } as const satisfies Record<HostEventName, readonly string[]>;
 
@@ -208,6 +223,7 @@ export class HostAnalytics {
   readonly #resolveRoutineRun: NonNullable<HostAnalyticsOptions["resolveRoutineRun"]>;
   readonly #resolveInventory: HostAnalyticsOptions["resolveInventory"];
   readonly #inventoryDayStore: HostAnalyticsOptions["inventoryDay"];
+  readonly #resources: HostAnalyticsOptions["resources"];
   readonly #client: HostOpenPanelClient | null;
   #identifiedOwner: AnalyticsIdentity | null = null;
   #trackingEnabled: boolean;
@@ -223,6 +239,7 @@ export class HostAnalytics {
   readonly #scope = Scope.makeUnsafe();
   #inventoryDay: string | null = null;
   #inventoryCheck = false;
+  #resourceCheck = false;
   readonly #operationQueue: AnalyticsOperationQueue = { active: false, operations: [] };
 
   constructor(options: HostAnalyticsOptions, createClient: ClientFactory = createOpenPanelClient) {
@@ -233,13 +250,14 @@ export class HostAnalytics {
     this.#resolveRoutineRun = options.resolveRoutineRun ?? (() => null);
     this.#resolveInventory = options.resolveInventory;
     this.#inventoryDayStore = options.inventoryDay;
+    this.#resources = options.resources;
     this.#trackingEnabled = options.trackingEnabled ?? true;
     if (!options.enabled) {
       this.#client = null;
       return;
     }
     try {
-      const client = createClient({ apiUrl: OPENPANEL_API_URL, clientId: OPENPANEL_CLIENT_ID });
+      const client = createClient({ apiUrl: options.apiUrl ?? OPENPANEL_API_URL, clientId: OPENPANEL_CLIENT_ID });
       client.setGlobalProperties({
         surface: "desktop_host",
         environment: "production",
@@ -288,6 +306,7 @@ export class HostAnalytics {
           owner,
         );
         this.#checkInventory();
+        this.checkResources();
         return;
       }
       case "turn-completed": {
@@ -442,6 +461,7 @@ export class HostAnalytics {
     }
     this.#flushPendingForOwner(owner);
     this.#checkInventory();
+    this.checkResources();
   }
 
   clear(): void {
@@ -647,6 +667,38 @@ export class HostAnalytics {
     );
   }
 
+  /**
+   * Sends the resource summary of the last closed day, once. It needs an owner, so it waits for
+   * sign-in. A day that closes while the user has analytics off is dropped, never sent later.
+   */
+  checkResources(): void {
+    const source = this.#resources;
+    if (this.#closed || this.#resourceCheck || !source || !this.#client) return;
+    const due = source.previousDay();
+    if (!due) return;
+    const sending = this.#trackingEnabled;
+    if (sending && !normalizeAnalyticsIdentity(this.#resolveOwner())) return;
+    this.#resourceCheck = true;
+    Effect.runFork(
+      Effect.gen({ self: this }, function* () {
+        // Cleared before the send, so a failed write sends nothing and a crash cannot send twice.
+        yield* source.clearPreviousDay(due.day);
+        const owner = normalizeAnalyticsIdentity(this.#resolveOwner());
+        if (!sending || this.#closed || !this.#trackingEnabled || !owner) return;
+        this.#trackForOwner("system_resources", due.properties, owner);
+      }).pipe(
+        Effect.ignore,
+        Effect.ensuring(
+          Effect.sync(() => {
+            this.#resourceCheck = false;
+          }),
+        ),
+        Effect.uninterruptible,
+        Effect.forkIn(this.#scope, { startImmediately: true }),
+      ),
+    );
+  }
+
   #trackForOwner(name: HostEventName, properties: HostProperties, owner: AnalyticsIdentity, flushPending = true): void {
     const sanitized = sanitizeHostEvent(name, properties);
     if (flushPending) this.#flushPendingForOwner(owner);
@@ -790,7 +842,7 @@ function normalizeAnalyticsIdentity(user: AnalyticsIdentity | null): AnalyticsId
   return id && email ? { id, email } : null;
 }
 
-export function sanitizeHostEvent(name: HostEventName, properties: HostProperties): HostProperties {
+function sanitizeHostEvent(name: HostEventName, properties: HostProperties): HostProperties {
   const allowed = HOST_ALLOWLIST[name];
   return Object.fromEntries(
     Object.entries(properties).flatMap(([key, value]) => {
@@ -802,6 +854,14 @@ export function sanitizeHostEvent(name: HostEventName, properties: HostPropertie
 }
 
 function sanitizeHostProperty(name: HostEventName, key: string, value: unknown): HostPropertyValue | undefined {
+  if (name === "system_resources") {
+    if (key === "ram_class" || key === "cpu_class" || key === "arch" || key === "host_kind") {
+      const allowed: readonly string[] = RESOURCE_ENUMS[key];
+      return isString(value) && allowed.includes(value) ? value : undefined;
+    }
+    if (key === "provider_tree_supported") return isBoolean(value) ? value : undefined;
+    return boundedCount(value, 10_000_000);
+  }
   if (key === "cause_code" || key === "severity" || key === "operation") {
     const safe = safeProperties({
       source: "host",
@@ -884,7 +944,7 @@ function sanitizeHostProperty(name: HostEventName, key: string, value: unknown):
  * address, a single-label or intranet name, or a name with no public ICANN suffix. Private suffixes
  * are ignored on purpose, so `user.github.io` reports as `github.io` and never names the user.
  */
-export function analyticsDomain(hostname: string): string | undefined {
+function analyticsDomain(hostname: string): string | undefined {
   const host = hostname.trim().toLowerCase().replace(/\.$/u, "");
   if (!host || host.length > 253) return undefined;
   const parsed = parseDomain(host, { allowPrivateDomains: false, extractHostname: false });
@@ -909,12 +969,6 @@ function slugList(value: unknown, allowed: (item: string) => boolean): readonly 
 
 function isRoutineRunFinished(status: RoutineRunConversationEventStatus): boolean {
   return isOneOf(ROUTINE_TERMINAL_STATUSES, status);
-}
-
-function localDay(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 /**

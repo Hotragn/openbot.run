@@ -1,5 +1,6 @@
 import { INPUT_LIMITS } from "./input-limits";
 import { type AvatarHue, isAvatarHue, isAvatarSeed } from "./ipc-agent-identity";
+import { type AgentModelChoice, isAgentModelChoice } from "./ipc-agents";
 import {
   type AgentApproval,
   type AgentApprovalPermissions,
@@ -132,7 +133,57 @@ function isRuntimePathList(value: unknown): value is string[] {
   );
 }
 
+/** Local desktop context state. Frozen Team adapters do not carry this field. */
+export interface AgentContextState {
+  agentId: string;
+  threadId: string;
+  usage: {
+    usedTokens: number;
+    windowTokens: number;
+    autoCompactAt: number | null;
+    nativeManaged: boolean;
+    estimated?: boolean;
+  } | null;
+  compaction: {
+    id: string;
+    startedAt: number;
+    status: "running" | "completed" | "failed";
+    beforeTokens?: number;
+    afterTokens?: number;
+    expectedMs?: number;
+  } | null;
+}
+
+function isContextCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isAgentContextState(value: unknown): value is AgentContextState {
+  if (!isDynamicRecord(value) || !isIdentifier(value.agentId) || !isIdentifier(value.threadId)) return false;
+  const usage = value.usage;
+  const compaction = value.compaction;
+  return (
+    (usage === null ||
+      (isDynamicRecord(usage) &&
+        isContextCount(usage.usedTokens) &&
+        isContextCount(usage.windowTokens) &&
+        usage.windowTokens > 0 &&
+        isBoolean(usage.nativeManaged) &&
+        (usage.estimated === undefined || isBoolean(usage.estimated)) &&
+        (usage.autoCompactAt === null || (isContextCount(usage.autoCompactAt) && usage.autoCompactAt <= 1)))) &&
+    (compaction === null ||
+      (isDynamicRecord(compaction) &&
+        isIdentifier(compaction.id) &&
+        isContextCount(compaction.startedAt) &&
+        isOneOf(["running", "completed", "failed"] as const, compaction.status) &&
+        (compaction.beforeTokens === undefined || isContextCount(compaction.beforeTokens)) &&
+        (compaction.afterTokens === undefined || isContextCount(compaction.afterTokens)) &&
+        (compaction.expectedMs === undefined || isContextCount(compaction.expectedMs))))
+  );
+}
+
 export interface AgentRuntimeSnapshot {
+  contextStates?: AgentContextState[];
   agents: AgentRuntimeRosterEntry[];
   activeTurns: Array<{ agentId: string; threadId: string; turnId: string }>;
   work: AgentRuntimeWorkItem[];
@@ -153,11 +204,20 @@ export interface AgentRuntimeSnapshot {
    * a released Team API snapshot: its adapters project a fixed key list.
    */
   usageLimits?: Array<{ agentId: string; resetsAt: number | null }>;
+  /**
+   * Each provider account and model that a usage limit holds, also when no agent is on it now. Absent
+   * from a released Team API snapshot, as `usageLimits` is.
+   */
+  usageLimitedModels?: AgentModelChoice[];
 }
 
 export function isAgentRuntimeSnapshot(value: unknown): value is AgentRuntimeSnapshot {
   if (!isDynamicRecord(value)) return false;
   return (
+    (value.contextStates === undefined ||
+      (Array.isArray(value.contextStates) &&
+        value.contextStates.length <= INPUT_LIMITS.agents &&
+        value.contextStates.every(isAgentContextState))) &&
     Array.isArray(value.agents) &&
     value.agents.length <= INPUT_LIMITS.agents &&
     value.agents.every(isAgentRuntimeRosterEntry) &&
@@ -205,7 +265,11 @@ export function isAgentRuntimeSnapshot(value: unknown): value is AgentRuntimeSna
             isDynamicRecord(limit) &&
             isIdentifier(limit.agentId) &&
             (limit.resetsAt === null || (isNumber(limit.resetsAt) && Number.isFinite(limit.resetsAt))),
-        )))
+        ))) &&
+    (value.usageLimitedModels === undefined ||
+      (Array.isArray(value.usageLimitedModels) &&
+        value.usageLimitedModels.length <= INPUT_LIMITS.agents &&
+        value.usageLimitedModels.every(isAgentModelChoice)))
   );
 }
 

@@ -1,5 +1,6 @@
 import { createScrollFades } from "@openbot/ui/components/createScrollFades";
 import type { AgentMessage } from "@openbot/ui/data";
+import type { RoutineRunToggleMarkerModel } from "@openbot/ui/features/conversation/ChatActionMarker";
 import {
   calculateChatScrollMargin,
   chatHistoryBoundaryReached,
@@ -22,7 +23,15 @@ import type { VirtualItem } from "@tanstack/virtual-core";
 import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { groupAgentMessageMarkers } from "../agent-message-timeline";
 import type { ConversationProps, ConversationTarget } from "../conversation-types";
-import { groupRoutineRunMarkers, summarizeRoutineRunMessages } from "../routine-run-timeline";
+import {
+  expandRoutineRunGroups,
+  groupRoutineRunMarkers,
+  placeRoutineRunTurns,
+  type RoutineRunOpenState,
+  routineRunToggleKey,
+  routineRunTurnMessages,
+  summarizeRoutineRunMessages,
+} from "../routine-run-timeline";
 
 interface ScrollElements {
   scrollElement: () => HTMLDivElement | undefined;
@@ -59,12 +68,20 @@ export function createScrollStore(deps: ScrollStoreDeps) {
   let newMessages: NewMessageTally = { count: 0, anchorId: undefined };
   let talliedConversationIdentity: string | undefined;
 
+  const [openRoutineRuns, setOpenRoutineRuns] = createSignal<RoutineRunOpenState>(new Map());
+  const shownMessages = createMemo(() =>
+    deps.props.messages.filter((message) => message.kind !== "thinking" && !silentAgentAnswer(message)),
+  );
+  const routineRunTurns = createMemo(() => routineRunTurnMessages(deps.props.messages, shownMessages()));
+  /* The messages of a routine run follow its row and open and close with it. */
   const drawnMessages = createMemo(() => [
-    ...summarizeRoutineRunMessages(
-      deps.props.messages.filter((message) => message.kind !== "thinking" && !silentAgentAnswer(message)),
-    ),
+    ...placeRoutineRunTurns(summarizeRoutineRunMessages(shownMessages()), routineRunTurns(), openRoutineRuns()),
     ...deps.pendingMessages(),
   ]);
+  function toggleRoutineRun(marker: RoutineRunToggleMarkerModel): void {
+    const key = routineRunToggleKey(marker);
+    setOpenRoutineRuns((open) => new Map(open).set(key, marker.expanded !== true));
+  }
   /*
    * The unread divider sits on the first unread row the timeline draws. A silent answer has no row,
    * so the divider moves to the next row that has one; read state keeps the stored message. A
@@ -78,12 +95,23 @@ export function createScrollStore(deps: ScrollStoreDeps) {
     return deps.props.messages.slice(start).find((message) => drawn.has(message.id))?.id ?? null;
   });
   /* A group of agent messages or routine runs stops at the unread divider, so the divider keeps its row. */
-  const timelineMessages = createMemo(() =>
-    groupRoutineRunMarkers(
-      groupAgentMessageMarkers(drawnMessages(), unreadBoundaryMessageId()),
-      unreadBoundaryMessageId(),
-    ),
-  );
+  const timelineMessages = createMemo(() => {
+    const group = (messages: readonly AgentMessage[]) =>
+      groupRoutineRunMarkers(groupAgentMessageMarkers(messages, unreadBoundaryMessageId()), unreadBoundaryMessageId());
+    const state = deps.props.contextState;
+    const startedAt =
+      state?.agentId === deps.props.agent?.id && state?.threadId === deps.props.agent?.threadId
+        ? state?.compaction?.startedAt
+        : undefined;
+    const messages = drawnMessages();
+    const boundary =
+      startedAt === undefined
+        ? -1
+        : messages.findIndex((message) => message.createdAt && Date.parse(message.createdAt) > startedAt);
+    const rows =
+      boundary < 0 ? group(messages) : [...group(messages.slice(0, boundary)), ...group(messages.slice(boundary))];
+    return expandRoutineRunGroups(rows, messages, routineRunTurns(), openRoutineRuns());
+  });
   /*
    * A row finds its message by id. The virtualizer gives a row its new index one tick after the list
    * changes, so a lookup by index draws the neighbouring message in the row for that tick.
@@ -268,6 +296,7 @@ export function createScrollStore(deps: ScrollStoreDeps) {
     clearNewMessages,
     messageVirtualizer,
     timelineMessages,
+    toggleRoutineRun,
     timelineIndexById,
     unreadBoundaryMessageId,
     updateScrollFade,

@@ -7,6 +7,7 @@ import type {
 } from "@openbot/contracts/ipc";
 import type { AgentActivityLabel } from "@openbot/ui/features/conversation/AgentActivity";
 import { currentText } from "@openbot/ui/text";
+import type { UserErrorDetails } from "@openbot/user-errors";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import type { ChatSearchMatch } from "./chat-search";
 import {
@@ -28,6 +29,7 @@ import type {
   VoiceLiveTranscript,
 } from "./conversation-types";
 import { createPendingSendStore } from "./stores/pending-send-store";
+import type { VoiceCloudStream } from "./stores/voice-store";
 
 const SETTINGS_PANEL_DEFAULT = 296;
 const BROWSER_PANEL_DEFAULT = 380;
@@ -64,6 +66,8 @@ interface ConversationResources {
   voiceChunks: Blob[];
   /** The live transcription in flight, so the final pass waits for it instead of racing it. */
   voiceLiveRequest: Promise<void> | undefined;
+  /** The ElevenLabs stream of the recording, when the selected model streams. */
+  voiceCloudStream: VoiceCloudStream | undefined;
   /** Stops the microphone level meter that draws the recording waveform. */
   voiceMeterStop: (() => void) | undefined;
   voiceAgentId: string | undefined;
@@ -200,6 +204,8 @@ export function createStableConversationState(
       unsentTexts: pendingSends.unsentTexts,
     });
   const [composerErrors, setComposerErrors] = createSignal<Record<string, string>>({});
+  /** The code of each composer error that came from a failure, keyed like `composerErrors`. */
+  const [composerErrorReferences, setComposerErrorReferences] = createSignal<Record<string, UserErrorDetails>>({});
   const [voicePhase, setVoicePhase] = createSignal<"idle" | "preparing" | "requesting" | "recording" | "transcribing">(
     "idle",
   );
@@ -223,6 +229,7 @@ export function createStableConversationState(
     voiceElapsedTimer: undefined,
     voiceChunks: [],
     voiceLiveRequest: undefined,
+    voiceCloudStream: undefined,
     voiceMeterStop: undefined,
     voiceAgentId: undefined,
     voiceServerId: undefined,
@@ -304,6 +311,8 @@ export function createStableConversationState(
     setConversationErrors,
     composerErrors,
     setComposerErrors,
+    composerErrorReferences,
+    setComposerErrorReferences,
     voicePhase,
     setVoicePhase,
     voiceModelProgress,
@@ -360,7 +369,6 @@ export function createServerConversationState() {
   const [browserAddressEditing, setBrowserAddressEditing] = createSignal(false);
   const [sidebarFilePreview, setSidebarFilePreview] = createSignal<SidebarFilePreview | null>(null);
   const [openReactionMessageId, setOpenReactionMessageId] = createSignal<string | null>(null);
-  const [openMoreMessageId, setOpenMoreMessageId] = createSignal<string | null>(null);
   const [expandedEmojiMessageId, setExpandedEmojiMessageId] = createSignal<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = createSignal<string | null>(null);
   const [chatSearchOpen, setChatSearchOpen] = createSignal(false);
@@ -399,8 +407,6 @@ export function createServerConversationState() {
     setSidebarFilePreview,
     openReactionMessageId,
     setOpenReactionMessageId,
-    openMoreMessageId,
-    setOpenMoreMessageId,
     expandedEmojiMessageId,
     setExpandedEmojiMessageId,
     copiedMessageId,

@@ -382,7 +382,11 @@ A change to the desktop app or the web client and the iPhone app gets one file i
 into `apps/mobile/CHANGELOG.md` and set the version in `apps/mobile/app.json`,
 `apps/mobile/package.json` and the copy of it in `bun.lock`. The pre-commit hook checks the new section when a commit changes the
 `app.json` version. The new section is `## [x.y.z] - In review`, and `/changelog` does not show it
-until the store makes the build available. Then `bun run mobile:release:published` writes the date.
+until a store makes the build available. Each store reviews the build on its own. When one store has
+it, `bun run mobile:release:published ios` (or `android`) writes the date of that store, such as
+`## [x.y.z] - 2026-10-14 (Android)`. Run it again for the other store:
+`## [x.y.z] - 2026-10-14 (Android), 2026-10-16 (iOS)`. A date with no store is the date of both
+stores. `/changelog` shows each store, and a store that does not have the version as "In review".
 
 `scripts/check-release-notes.ts` stops a release when the section is missing, empty or appears two
 times, or when it has an unknown group, a group with no items, an item with no text or outside a
@@ -396,6 +400,36 @@ group, a placeholder such as `TODO`, or a heading with no real date. These steps
   `changelog.d` file and does not change `CHANGELOG.md`, unless the pull request has the
   `no-changelog` label. Use the label when a user sees no change.
 - `bun run release:preflight` and the tag workflow check the section of the `package.json` version.
+
+### Post-update notes
+
+The desktop dialog uses edited excerpts of the published `CHANGELOG.md` in
+`src/renderer/src/features/updates/whats-new-releases.json`. Before publishing a desktop release,
+add its version, date, and selected notes there. Keep earlier entries for users who skip releases.
+Use short, plain sentences that explain what the user can do. Put required upgrade steps in
+`notices`. Use `added`, `changed`, and `fixed` for the other entries. Do not copy commit messages,
+developer setup, internal paths, credentials, or unpublished plans. Review this text with the
+release notes before tagging. A release can have no dialog entry when it has nothing to show.
+
+The app bundles this text and loads it when needed, so reading it does not send data or require
+network access. The full changelog button opens the existing public page. Changing the bundled
+text requires a new app release. Missing entries do not cause a network fallback.
+
+The installed desktop version comes from `AppInfo`, not an available update or a remote server.
+In development, `AppInfo` uses `package.json`; Electron otherwise reports its own version.
+The local app profile keeps the highest consumed version in `openbot:whats-new-version`. On the
+first launch of this feature, an existing `openbot:analytics-app-version` can supply the previous
+version; the dialog does not enable analytics. A profile with no previous version gets a silent
+baseline, so onboarding is not covered by release notes. Stable `x.y.z` releases participate;
+unknown versions and prerelease builds do not advance the marker. Downgrades do not lower it.
+The marker is saved before automatic display, including a load error; Settings > Updates can
+open the notes again. Empty updates are consumed without opening. If the marker cannot be saved,
+automatic display is disabled; manual opening still works.
+
+Mobile has its own store version and `apps/mobile/CHANGELOG.md`. It must use a native screen and
+its own local marker when post-update notes are added there. Desktop notes must not use a mobile
+version or the version of a connected server. This desktop feature does not change mobile,
+public web, Signal, database schemas, or Team API contracts.
 
 ## Publish a version
 
@@ -513,12 +547,14 @@ runtime and no remote desktop runtime, so voice prompts and remote desktop repor
 unavailable there. The NVIDIA Parakeet TDT 0.6B v3 int8 model is not part of an application or update
 artifact. OpenBot downloads its four pinned files on first voice use, checks the size and SHA-256 of
 each, and keeps the verified files in `runtimes/parakeet-tdt-0.6b-v3-int8` in the user data directory
-for later offline use. At startup, a packaged application removes the old `runtimes/whisper`
-directory if it exists.
+for later offline use. The optional Whisper large-v3 turbo int8 model, which takes a fixed dictation
+language, is downloaded the same way only when the user selects Download in Settings > Voice. Its
+three pinned files go in `runtimes/whisper-turbo-int8`. At startup, a packaged application removes
+the old `runtimes/whisper` directory if it exists.
 
 The release workflow stops if the macOS update ZIP, the Windows NSIS installer, or the Linux AppImage
 is larger than 700 MiB, or if the DMG is larger than 750 MiB. It also stops if update metadata has a wrong size or SHA-512, if
-the voice model is present, or if the application contains a second native Claude runtime.
+a voice model is present, or if the application contains a second native Claude runtime.
 
 If a release is bad, publish a newer patch version. Do not replace an already published version with
 different binaries.
@@ -556,7 +592,9 @@ Before creating the first tag or any later release:
 11. confirm the canary update does not crash in `CFURLConnectionSynchronous`, preserves data, starts
     the new version, and can run three provider downloads with restricted memory;
 12. on Windows 10 and 11 x64, confirm that normal exit, restart, and sign-out do not start NSIS, while
-    `Restart and install` does start it;
+    `Restart and install` does start it. With OpenBot closed and with it open, confirm that Open
+    OpenBot on a `/join` page opens OpenBot and shows the invitation once, and that uninstall
+    removes `HKCU\Software\Classes\openbot`;
 13. on Ubuntu 24.04 x64 with the AppArmor profile from `build/linux/openbot.apparmor` installed,
     confirm the AppImage starts with the sandbox on, that `xdg-open 'openbot://join?...'` focuses the
     running application, that a provider downloads in-app, that the server rail is drawn, and that the

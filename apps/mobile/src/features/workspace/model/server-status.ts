@@ -1,5 +1,5 @@
 import type { MobileTextKey, MobileTranslate } from "@openbot/i18n/mobile";
-import { type RemoteRecoveryStatus, remoteRecoveryMessage } from "@openbot/team-client";
+import { type RemoteConnectionFailure, type RemoteRecoveryStatus, remoteRecoveryMessage } from "@openbot/team-client";
 import type { MobileServer, MobileServerState } from "./workspace-types";
 
 const LABELS = {
@@ -18,16 +18,11 @@ export function serverStatusLabel(
   return t(LABELS[server.state]);
 }
 
-export function applyServerFailure(server: MobileServer, connectionMessage: string | null): MobileServer {
-  // Suspending RTC also rejects in-flight loads; their failure must not replace the protocol error.
-  if (server.recoveryStatus?.phase === "suspended") return server;
-  return { ...server, state: "offline", initialConnectionPending: false, connectionMessage };
-}
-
 export function applyServerRecovery(
   server: MobileServer,
   status: RemoteRecoveryStatus,
   failure: string | null,
+  details: RemoteConnectionFailure | null = null,
 ): MobileServer {
   const state: MobileServerState =
     status.phase === "online"
@@ -41,6 +36,7 @@ export function applyServerRecovery(
     ...server,
     state,
     connectionMessage: remoteRecoveryMessage(status, failure),
+    connectionFailure: status.phase === "online" ? null : details,
     recoveryStatus: status,
     initialConnectionPending: server.initialConnectionPending && state === "connecting",
   };

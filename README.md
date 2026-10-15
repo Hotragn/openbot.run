@@ -106,7 +106,8 @@ docker run -d --name openbot --restart unless-stopped \
 docker exec -it openbot openbot login
 ```
 
-See [Docker](docs/docker.md) for Compose, the data volume, upgrades and the security limits.
+See [Docker](docs/docker.md) for Compose, the data volume, upgrades and the security limits. For Amazon ECS,
+see [AWS ECS](docs/aws-ecs.md).
 
 > [!IMPORTANT]
 > Windows releases are signed by `SYNTHETIFY LABS SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ`. Older
@@ -155,8 +156,11 @@ OpenBot include it. Sign in opens Google's sign-in page in your browser. OpenBot
 `antigravity` command on your search path, because the Antigravity editor installs a command with
 that name. Set `OPENBOT_ANTIGRAVITY_PATH` to select a server executable yourself. Put it in a
 `bin/` folder, and put an `antigravity-package.json` file with its `version` in the folder above
-`bin/`. When that path is set, OpenBot uses only it. Gemini agents stay on this computer: team
-members do not see them.
+`bin/`. Keep `localharness_external` beside the server. When that path is set, OpenBot uses
+only it. Connect remains available in the host's local Settings > Providers screen. Remote
+settings cannot perform Google sign-in; use a browser on the host. See
+[Gemini setup and download recovery](docs/architecture/providers.md#gemini) for the required
+layout, the reported IPv6 download failure, and checks that do not change host networking.
 
 Cursor uses a Cursor plan or a Cursor API key. OpenBot downloads and pins the Cursor CLI
 (`cursor-agent`) when you select Download on the Cursor row in More providers, and starts it with
@@ -361,6 +365,7 @@ See [web client delivery](docs/web-client.md) for the release gate and focused c
 | `bun run dist:linux:arm64` | Build an unsigned Linux arm64 AppImage on arm64 Linux. |
 | `bun run release:patch` | Create the next patch version commit and tag. |
 | `bun run mobile:release:patch` | Move the iPhone app notes from `apps/mobile/changelog.d` into `apps/mobile/CHANGELOG.md` and set the next patch version in `app.json`. Also `mobile:release:minor` and `mobile:release:major`. |
+| `bun run mobile:release:published <ios\|android\|both>` | Write today's date for a store that made the mobile build available. `/changelog` shows each store, and a store that still reviews the build as "In review". Add `--version x.y.z` for a version that is not in `app.json`. |
 | `bun run test:custom-agents` | Run two fake ACP agents through the agent store, Check agent and the `acp` provider router: equal session ids, restart and resume, switch, and delete. Offline; writes `.openbot-build/custom-acp-agent-e2e/report.json`. |
 | `bun run test:filesystem` | **Online/manual:** run real full-access Codex and Claude filesystem turns across private and shared workspaces. |
 | `bun run test:imagegen` | **Online/manual:** run a real full-access image-generation turn. |

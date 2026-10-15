@@ -2,6 +2,13 @@ import type { PartialTranslation } from "../../message";
 import type { messages as source } from "../en/agentSettings";
 
 export const messages = {
+  "agentSettings.session.title": "Configurações do provedor",
+  "agentSettings.session.readFailed": "Não foi possível ler as configurações do provedor.",
+  "agentSettings.session.pending": "As mudanças salvas valem antes do próximo turno.",
+  "agentSettings.session.unavailable": "O valor salvo {value} não está disponível. Escolha outro valor ou restaure-o.",
+  "agentSettings.session.effective": "Valor atual do provedor: {value}",
+  "agentSettings.session.reset": "Restaurar configuração",
+  "agentSettings.session.resetNamed": "Restaurar {name}",
   "agentSettings.label": "Configurações do agente",
   "agentSettings.title": "Configurações",
   "agentSettings.backToDetails": "Voltar aos detalhes",
@@ -9,6 +16,27 @@ export const messages = {
   "agentSettings.backToSettings": "Voltar às configurações",
   "agentSettings.permissions.title": "Permissões",
   "agentSettings.advanced.title": "Avançado",
+  "agentSettings.backupModels.title": "Modelos de reserva",
+  "agentSettings.backupModels.valueAsk": "Perguntar antes",
+  "agentSettings.backupModels.valueAutomatic": "Automático",
+  "agentSettings.backupModels.valueCount": { one: "{mode} · {count}", other: "{mode} · {count}" },
+  "agentSettings.backupModels.intro":
+    "Quando {model} atinge o limite de uso antes de {name} começar a escrever, {name} pergunta qual modelo você quer usar.",
+  "agentSettings.backupModels.introAutomatic":
+    "Quando {model} atinge o limite de uso antes de {name} começar a escrever, {name} troca para o primeiro modelo disponível na ordem.",
+  "agentSettings.backupModels.ask": "Perguntar antes de trocar",
+  "agentSettings.backupModels.order": "Ordem",
+  "agentSettings.backupModels.listLabel": "Modelos de reserva, em ordem",
+  "agentSettings.backupModels.empty": "Nenhuma ordem definida. {name} oferece cada modelo disponível.",
+  "agentSettings.backupModels.add": "Adicionar modelo de reserva",
+  "agentSettings.backupModels.moveUp": "Mover {model} para cima",
+  "agentSettings.backupModels.moveDown": "Mover {model} para baixo",
+  "agentSettings.backupModels.remove": "Remover {model}",
+  "agentSettings.backupModels.limited": "Limite de uso atingido · ignorado",
+  "agentSettings.backupModels.unavailable": "Indisponível agora · ignorado",
+  "agentSettings.backupModels.withAccount": "{model} · {account}",
+  "agentSettings.backupModels.note":
+    "{name} nunca troca depois de começar a escrever. Volta para {model} quando o limite termina.",
   "agentSettings.groups.brain": "Cérebro",
   "agentSettings.groups.knows": "Sabe",
   "agentSettings.groups.does": "Faz",
@@ -103,6 +131,9 @@ export const messages = {
     "O Uso do computador e o navegador do OpenBot não são limitados; você pode desativar o Uso do computador abaixo.",
   "agentSettings.computerUse.title": "Uso do computador",
   "agentSettings.computerUse.description": "Permitir que este agente controle aplicativos neste computador",
+  "agentSettings.automation.title": "Scripts locais",
+  "agentSettings.automation.description":
+    "Permitir que scripts no host enviem mensagens, executem rotinas, respondam perguntas e aceitem ou recusem aprovações",
   "agentSettings.runtime.workspaceEnforcedProcess":
     "Todo o processo do {provider} é executado em um ambiente isolado, por isso a gravação fora desses locais falha. Disponível somente no macOS.",
 } as const satisfies PartialTranslation<typeof source>;

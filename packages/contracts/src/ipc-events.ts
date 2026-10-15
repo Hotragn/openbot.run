@@ -1,5 +1,13 @@
-import { isRoutineSchedule, type RoutineLimitPolicy, type RoutineSchedule } from "./ipc-routines";
-import { isDynamicRecord, isNumber, isString } from "./runtime-values";
+import {
+  isRoutineRunFields,
+  isRoutineSchedule,
+  ROUTINE_MISSED_POLICIES,
+  type RoutineLimitPolicy,
+  type RoutineMissedPolicy,
+  type RoutineRunFields,
+  type RoutineSchedule,
+} from "./ipc-routines";
+import { isDynamicRecord, isNumber, isOneOf, isString } from "./runtime-values";
 
 /** JSON values accepted from a webhook request. */
 export type EventJsonValue =
@@ -59,6 +67,7 @@ export interface EventRoutine {
   timezone: string;
   trigger: EventRoutineTrigger;
   limitPolicy?: RoutineLimitPolicy;
+  missedPolicy?: RoutineMissedPolicy;
   createdAt: string;
   updatedAt: string;
 }
@@ -72,6 +81,7 @@ export interface SaveEventRoutineInput {
   timezone: string;
   trigger: EventRoutineTriggerInput;
   limitPolicy?: RoutineLimitPolicy;
+  missedPolicy?: RoutineMissedPolicy;
 }
 
 /** `secret` is set only when this save made a new webhook trigger. The host does not show it again. */
@@ -98,6 +108,22 @@ export interface ListEventActivityInput {
   owner: EventRoutineOwner;
   routineId: string;
   limit?: number;
+}
+
+/** The newest runs of one routine, with the records of the occurrences it missed. */
+export interface ListEventRoutineRunsInput {
+  owner: EventRoutineOwner;
+  routineId: string;
+  limit?: number;
+}
+
+/**
+ * One run in the history of an event routine. An agent run names the chat message it posted in
+ * `deliveryId`, and a channel run names its channel message in `requestMessageId`.
+ */
+export interface EventRoutineRun extends RoutineRunFields {
+  deliveryId?: string | null;
+  requestMessageId?: string | null;
 }
 
 /** The verified request that starts a webhook routine. Secrets and signature headers are never part of it. */
@@ -216,6 +242,7 @@ function isEventRoutine(value: unknown): value is EventRoutine {
     isString(value.timezone) &&
     isEventRoutineTrigger(value.trigger) &&
     (value.limitPolicy === undefined || value.limitPolicy === "wait" || value.limitPolicy === "skip") &&
+    (value.missedPolicy === undefined || isOneOf(ROUTINE_MISSED_POLICIES, value.missedPolicy)) &&
     isTimestamp(value.createdAt) &&
     isTimestamp(value.updatedAt)
   );
@@ -267,3 +294,13 @@ export const decodeEventActivity = decodeList(isEventActivity, "Invalid event ac
 export const decodeEventRoutines = decodeList(isEventRoutine, "Invalid event routine response.");
 export const decodeSaveEventRoutineResult = decodeOne(isSaveEventRoutineResult, "Invalid event routine response.");
 export const decodeWebhookSecret = decodeOne(isWebhookSecret, "Invalid webhook secret response.");
+function isEventRoutineRun(value: unknown): value is EventRoutineRun {
+  return (
+    isRoutineRunFields(value) &&
+    isDynamicRecord(value) &&
+    (value.deliveryId === undefined || value.deliveryId === null || isString(value.deliveryId)) &&
+    (value.requestMessageId === undefined || value.requestMessageId === null || isString(value.requestMessageId))
+  );
+}
+
+export const decodeEventRoutineRuns = decodeList(isEventRoutineRun, "Invalid routine run response.");

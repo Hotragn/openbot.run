@@ -383,6 +383,7 @@
 
 .agent-routine-run-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
   margin-top: 0;
 }
@@ -406,12 +407,13 @@
   cursor: pointer;
 }
 
-/* An ignored webhook request: the time, then a muted note. */
+/* The time, then a muted note: an ignored webhook request, skipped runs, or a late start. */
 .agent-routine-run-text {
   display: flex;
   min-width: 0;
   flex: 1;
-  gap: var(--openbot-space-2);
+  flex-wrap: wrap;
+  gap: 0 var(--openbot-space-2);
   white-space: nowrap;
 }
 
@@ -425,6 +427,35 @@
 
 .agent-routine-history-error {
   margin-bottom: var(--openbot-space-2);
+}
+
+/* A run whose answer went to a messaging place: the run row, then where the answer went. */
+.agent-routine-run-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.agent-routine-delivery-row {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 var(--openbot-space-2) 5px;
+  font-size: var(--openbot-text-sm);
+}
+
+/* The reason is why the answer is missing from the place, so it wraps rather than cuts off. */
+.agent-routine-delivery-note {
+  min-width: 0;
+  color: var(--openbot-text-muted);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.agent-routine-delivery-failed,
+.agent-routine-delivery-uncertain {
+  color: var(--openbot-warning);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -611,9 +642,20 @@
   gap: var(--openbot-space-1);
 }
 
+.agent-memory-inclusion-actions {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--openbot-space-1);
+}
+
 .agent-memory-list {
   min-height: 0;
   display: grid;
+  grid-auto-rows: max-content;
   flex: 1;
   align-content: start;
   gap: var(--openbot-space-0-5);

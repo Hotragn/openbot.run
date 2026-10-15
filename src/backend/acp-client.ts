@@ -30,7 +30,7 @@ import {
   currentModelFromSessionSetup,
   sessionSettingsSnapshot,
 } from "./acp-configuration";
-import { AcpConnection } from "./acp-connection";
+import { AcpConnection, type AcpConnectionOptions } from "./acp-connection";
 import { acpPlanSteps, PLAN_UPDATED_METHOD } from "./agent/plan-updates";
 import { elicitationOptions, elicitationValue, secretElicitationField } from "./agent/prompts";
 import { isUsageLimitDiagnostic } from "./agent/provider-diagnostics";
@@ -67,6 +67,7 @@ import {
 } from "./protocol";
 import {
   type ProviderClientOperationError,
+  ProviderSignInError,
   providerCall,
   providerFailure,
   providerResult,
@@ -107,11 +108,20 @@ interface AcpTurn {
   thought: string;
   thoughtStarted: boolean;
   receivedOutput: boolean;
+  /** The model sent reasoning text. An empty OpenCode turn then names reasoning without an answer. */
+  reasoned: boolean;
   /**
    * The partial reply and the harness error that cut it. It becomes the answer when no text comes
    * after the error, because then the harness did not retry.
    */
   interruptedAnswer: string | null;
+  /** A failure that the server sent as answer text and then ended the turn as a success. */
+  providerError: string | null;
+  /**
+   * Where the answer text stood when Antigravity logged that its SDK failed this prompt. The
+   * server then sends the failure as answer text and ends the turn as a success.
+   */
+  sdkFailureAt: number | null;
   /** The prompt told the model not to answer, so an empty turn is a success. */
   answerOptional: boolean;
   messages: ThreadItem[];
@@ -120,9 +130,7 @@ interface AcpTurn {
   toolKinds: Map<string, string>;
   /** The latest durable shape of each tool call until ACP reports its terminal status. */
   toolItems: Map<string, ThreadItem>;
-  /** Steered prompts that the agent refused while this turn ran; sent when the running prompt ends. */
-  deferredPrompts: ContentBlock[][];
-  /** The user stopped the turn, so no deferred prompt is sent. */
+  /** The user stopped the turn. */
   stopped: boolean;
   completing: boolean;
   task: Fiber.Fiber<void, ProviderClientOperationError> | null;
@@ -176,7 +184,7 @@ const ACP_SESSION_IDLE_RELEASE_MS = 10 * 60_000;
  * user's MCP servers (`npx chrome-devtools-mcp` is about 300 MB), so one turn on each of five agents
  * otherwise holds five sets for ten minutes.
  */
-export const ACP_IDLE_SESSION_LIMIT = 2;
+const ACP_IDLE_SESSION_LIMIT = 2;
 
 interface AcpProviderAccount {
   email: string | null;
@@ -255,6 +263,8 @@ export interface AcpProviderOptions {
    * when this computer cannot make the sandbox, and then the process does not start.
    */
   confine?(target: SpawnTarget): SpawnTarget;
+  /** A temporary folder of its own for each process (`provider-temp.ts`). */
+  privateTemp?: AcpConnectionOptions["privateTemp"];
   signInMessage: string;
   /**
    * Whether the model this turn runs on may still be used. Read here, after every wait this client
@@ -276,6 +286,16 @@ export interface AcpProviderOptions {
     initialization: InitializeResponse,
   ): Effect.Effect<void, ProviderClientOperationError>;
   /**
+   * The message for a refused sign-in while a saved key is in use, or `null` without a key. A
+   * refused key must say so: a browser sign-in cannot help while the key wins over it.
+   */
+  savedKeyRefusedMessage?: () => string | null;
+  /**
+   * The stderr line of a server that starts an interactive sign-in by itself when its token is not
+   * valid. The account check then reports sign-in required at once and does not wait for the user.
+   */
+  interactiveSignInPrompt?: RegExp;
+  /**
    * Reads optional identity fields that ACP does not define. A provider extension failing must not
    * turn a working authenticated process into a signed-out one, so account/read falls back to null
    * fields when this hook cannot answer.
@@ -289,6 +309,7 @@ export interface AcpProviderOptions {
 }
 
 export class AcpAgentClient extends EventEmitter<ClientEvents> {
+  readonly contextCompaction = "unsupported";
   get provider(): AgentProvider {
     return this.options.provider;
   }
@@ -337,6 +358,8 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
   #models: AcpModel[] = [];
   #lastTurnStartedAt = 0;
   #signedIn = false;
+  /** Settles when the server asks for an interactive sign-in while `initialize` checks the account. */
+  #signInPrompt: Deferred.Deferred<void> | null = null;
 
   constructor(
     cli: AgentCliInfo,
@@ -345,14 +368,33 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
   ) {
     super();
     this.#transport = new AcpConnection({
+      provider: options.provider,
       cli,
       argv: options.argv,
       env: options.env,
       extraEnv: options.extraEnv,
       confine: options.confine,
+      privateTemp: options.privateTemp,
       label: () => this.#label,
       redact: (text) => this.#redact(text),
-      diagnostic: (message, origin) => this.emit("diagnostic", message, origin),
+      privateDiagnostic: options.interactiveSignInPrompt,
+      diagnostic: (message, origin) => {
+        // The prompt carries OAuth state, so it is not a diagnostic. Only an explicit sign-in opens it.
+        if (options.interactiveSignInPrompt?.test(message)) {
+          if (this.#signInPrompt) Deferred.doneUnsafe(this.#signInPrompt, Exit.void);
+          else {
+            // The token stopped being valid after the account check, and the server now waits five
+            // minutes for a browser that does not open. The process ends, so its request fails now.
+            this.#signedIn = false;
+            this.emit("exit", new Error(options.signInMessage));
+          }
+          return;
+        }
+        const failedSession = options.provider === "antigravity" ? GEMINI_SDK_FAILURE.exec(message)?.[1] : undefined;
+        const failedTurn = failedSession ? this.#threads.get(failedSession)?.activeTurn : undefined;
+        if (failedTurn && failedTurn.sdkFailureAt === null) failedTurn.sdkFailureAt = failedTurn.text.length;
+        this.emit("diagnostic", message, origin);
+      },
       exit: (error) => this.emit("exit", error),
       client: () => ({
         requestPermission: (params) => runCauseEffect(this.#requestPermission(params)),
@@ -644,9 +686,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
         error instanceof RequestError &&
         (method === "turn/start" ||
           method === "turn/steer" ||
-          ((method === "thread/start" || method === "thread/resume") &&
-            isRecord(error.data) &&
-            typeof error.data.details === "string"))
+          ((method === "thread/start" || method === "thread/resume") && failureDetail(error) !== null))
       ) {
         // Keep the protocol error type: details alone must never authorize session replacement.
         return yield* providerFailure(
@@ -781,13 +821,12 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
         return yield* providerSync(() => decoder({ thread: { id: threadId, turns: [] } }));
       }
       case "turn/start": {
-        const response = yield* this.#startTurnEffect(params, false);
+        const response = yield* this.#startTurnEffect(params);
         return yield* providerSync(() => decoder(response));
       }
-      case "turn/steer": {
-        const response = yield* this.#startTurnEffect(params, true);
-        return yield* providerSync(() => decoder(response));
-      }
+      case "turn/steer":
+        // A second ACP prompt can cancel the active turn. Keep deferred input in the mailbox.
+        return yield* providerFailure(new Error(sourceText("error.backend.steerUnsupported")));
       case "turn/interrupt": {
         const threadId = yield* providerSync(() => requiredString(params, "threadId"));
         // A closed idle session has no turn to stop.
@@ -797,7 +836,6 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
         const requestedTurnId = getString(params, "turnId");
         if (!turn || (requestedTurnId !== null && requestedTurnId !== turn.id))
           return yield* providerSync(() => decoder({}));
-        // A stop also stops the steers that wait for the running prompt, if that prompt ends anyway.
         turn.stopped = true;
         const cancel = providerCall(() => this.#requireConnection().cancel({ sessionId: thread.id }));
         if (this.provider === "antigravity") {
@@ -889,19 +927,33 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       }),
     );
     const initialization = this.#initialization;
+    const signInPrompt = Deferred.makeUnsafe<void>();
+    this.#signInPrompt = signInPrompt;
     try {
       providerResult(yield* Effect.result(this.options.authenticate?.(connection, initialization) ?? Effect.void));
-      this.#models = providerResult(yield* Effect.result(this.#configuration.discoverModels(timeoutMs)));
+      const discovery = yield* Effect.raceFirst(
+        Effect.result(this.#configuration.discoverModels(timeoutMs)),
+        Deferred.await(signInPrompt).pipe(Effect.as(null)),
+      );
+      if (!discovery) {
+        this.#signedIn = false;
+        return;
+      }
+      this.#models = providerResult(discovery);
       if (this.#models.length === 0 && !this.options.allowNoModels) {
         throw new Error(sourceText("error.provider.acpNoModels"));
       }
       this.#signedIn = true;
     } catch (error) {
       if (isAuthenticationError(error)) {
+        const keyRefused = this.options.savedKeyRefusedMessage?.();
+        if (keyRefused) return yield* providerFailure(new ProviderSignInError({ message: keyRefused }));
         this.#signedIn = false;
         return;
       }
       return yield* providerFailure(error);
+    } finally {
+      this.#signInPrompt = null;
     }
   });
 
@@ -1405,11 +1457,10 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
   readonly #startTurnEffect = Effect.fn("AcpAgentClient.startTurn")(function* (
     this: AcpAgentClient,
     params: unknown,
-    steer: boolean,
   ): Effect.fn.Return<{ turn: { id: string; status: string }; turnId?: string }, ProviderClientOperationError> {
     const threadId = yield* providerSync(() => requiredString(params, "threadId"));
     return yield* this.#threads
-      .startTurn(threadId, () => this.#openTurn(threadId, params, steer))
+      .startTurn(threadId, () => this.#openTurn(threadId, params))
       .pipe(toProviderClientOperationError);
   });
 
@@ -1417,11 +1468,10 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
     this: AcpAgentClient,
     threadId: string,
     params: unknown,
-    steer: boolean,
   ): Effect.fn.Return<{ turn: { id: string; status: string }; turnId?: string }, ProviderClientOperationError> {
     yield* this.#threads.wake(threadId).pipe(toProviderClientOperationError);
     let thread = yield* providerSync(() => this.#requireThread(threadId));
-    if (!steer && thread.needsResume && !thread.activeTurn) {
+    if (thread.needsResume && !thread.activeTurn) {
       yield* this.#startThread(
         {
           threadId,
@@ -1436,67 +1486,38 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       );
       thread = yield* providerSync(() => this.#requireThread(threadId));
     }
-    if (!steer && thread.activeTurn)
-      return yield* providerFailure(new Error("The ACP thread already has an active turn."));
-    if (steer && !thread.activeTurn)
-      return yield* providerFailure(new Error("The ACP thread has no active turn to steer."));
+    if (thread.activeTurn) return yield* providerFailure(new Error("The ACP thread already has an active turn."));
     yield* this.#configuration.applyConfig(
       thread,
       getString(params, "model"),
       getString(params, "effort"),
       this.#models,
     );
-    if (!steer) {
-      const overrides = getRecord(params, "sessionSettings");
-      for (const [configId, value] of Object.entries(overrides ?? {})) {
-        if (typeof value !== "boolean" && typeof value !== "string")
-          return yield* providerFailure(new Error(sourceText("error.provider.sessionSettingInvalid")));
-        const option = sessionSettingsSnapshot(thread.configOptions).options.find((entry) => entry.id === configId);
-        // A provider update can remove an option or choice. Keep the saved override in the
-        // store and report the effective value for correction, without blocking the prompt.
-        const available =
-          option?.type === "boolean"
-            ? typeof value === "boolean"
-            : option?.type === "select" &&
-              typeof value === "string" &&
-              option.options.some((choice) => choice.value === value);
-        if (available && option?.currentValue !== value) yield* this.#configuration.set(thread, configId, value);
-      }
+    const overrides = getRecord(params, "sessionSettings");
+    for (const [configId, value] of Object.entries(overrides ?? {})) {
+      if (typeof value !== "boolean" && typeof value !== "string")
+        return yield* providerFailure(new Error(sourceText("error.provider.sessionSettingInvalid")));
+      const option = sessionSettingsSnapshot(thread.configOptions).options.find((entry) => entry.id === configId);
+      // A provider update can remove an option or choice. Keep the saved override in the
+      // store and report the effective value for correction, without blocking the prompt.
+      const available =
+        option?.type === "boolean"
+          ? typeof value === "boolean"
+          : option?.type === "select" &&
+            typeof value === "string" &&
+            option.options.some((choice) => choice.value === value);
+      if (available && option?.currentValue !== value) yield* this.#configuration.set(thread, configId, value);
     }
     this.#publishSessionSettings(thread);
-    const activeTurn = thread.activeTurn;
-    const turnId = steer && activeTurn ? activeTurn.id : (getString(params, "clientUserMessageId") ?? randomUUID());
+    const turnId = getString(params, "clientUserMessageId") ?? randomUUID();
     const blocks = yield* promptBlocksEffect(params);
-    if (!steer && thread.developerInstructions) {
+    if (thread.developerInstructions) {
       blocks.unshift({
         type: "text",
         text: `<openbot-developer-instructions>\n${thread.developerInstructions}\n</openbot-developer-instructions>`,
       });
     }
     yield* providerSync(() => this.#requireServedModel(thread));
-    if (steer) {
-      // A steered message can want an answer, so an empty turn is again a failure to report.
-      if (activeTurn) activeTurn.answerOptional = false;
-      // ACP has no steer request, and an agent can refuse a second prompt while one runs. The turn
-      // then sends the refused prompt after the running one ends, so the message is not lost.
-      const connection = yield* providerSync(() => this.#requireConnection());
-      yield* Effect.forkIn(
-        providerCall(() => connection.prompt({ sessionId: thread.id, prompt: blocks })).pipe(
-          Effect.catch((failure) =>
-            Effect.sync(() => {
-              if (activeTurn && thread.activeTurn === activeTurn) {
-                activeTurn.deferredPrompts.push(blocks);
-                return;
-              }
-              this.emit("diagnostic", this.#redact(`ACP steer failed: ${String(failure.cause)}`));
-            }),
-          ),
-        ),
-        this.#scope,
-        { startImmediately: true },
-      );
-      return { turn: { id: turnId, status: "inProgress" }, turnId };
-    }
     const currentSecond = Date.now() / 1_000;
     const startedAt = Math.max(currentSecond, this.#lastTurnStartedAt + 0.001);
     this.#lastTurnStartedAt = startedAt;
@@ -1510,13 +1531,15 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       thought: "",
       thoughtStarted: false,
       receivedOutput: false,
+      reasoned: false,
       interruptedAnswer: null,
+      providerError: null,
+      sdkFailureAt: null,
       answerOptional: isRecord(params) && params.answerOptional === true,
       messages: [],
       toolNames: new Map(),
       toolKinds: new Map(),
       toolItems: new Map(),
-      deferredPrompts: [],
       stopped: false,
       completing: false,
       task: null,
@@ -1549,43 +1572,20 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
     prompt: ContentBlock[],
   ): Effect.fn.Return<void, ProviderClientOperationError> {
     try {
-      let response = providerResult(
+      const response = providerResult(
         yield* Effect.result(providerCall(() => this.#requireConnection().prompt({ sessionId: thread.id, prompt }))),
       );
-      for (;;) {
-        if (thread.activeTurn !== turn || turn.completing) return;
-        if (response.usage)
-          this.emit("notification", {
-            method: "openbot/usage",
-            params: { threadId: thread.id, turnId: turn.id, usage: response.usage },
-          });
-        const deferred = response.stopReason === "end_turn" && !turn.stopped ? turn.deferredPrompts.shift() : undefined;
-        if (!deferred) break;
-        // The reply to the earlier prompt is complete; the refused steer gets its own reply.
-        this.#completeThought(thread, turn);
-        this.#completeMessage(thread, turn, "final_answer");
-        const answered = turn.receivedOutput;
-        turn.receivedOutput = false;
-        const next = yield* providerCall(() =>
-          this.#requireConnection().prompt({ sessionId: thread.id, prompt: deferred }),
-        ).pipe(
-          Effect.catch((failure) =>
-            Effect.sync(() => {
-              // The agent refused the steer again, so the earlier reply ends the turn.
-              this.emit("diagnostic", this.#redact(`ACP steer failed: ${String(failure.cause)}`));
-              return null;
-            }),
-          ),
-        );
-        if (!next) {
-          turn.receivedOutput = answered;
-          break;
-        }
-        response = next;
-      }
-      // OpenCode can swallow provider errors and report a successful, empty ACP turn.
-      // Do not invent the upstream cause or report that turn as a successful reply. A turn told not
-      // to answer ends empty on purpose, and an error there costs no answer the user waits for.
+      if (thread.activeTurn !== turn || turn.completing) return;
+      if (response.usage)
+        this.emit("notification", {
+          method: "openbot/usage",
+          params: { threadId: thread.id, turnId: turn.id, usage: response.usage },
+        });
+      // OpenCode reports a model reply with no text, or with reasoning only, as a successful empty
+      // turn and logs no error. OpenCode 1.18.31 failed the prompt on a rate limit and on a refused
+      // connection; other provider errors can still end here. Do not invent the upstream cause or
+      // report that turn as a successful reply. A turn told not to answer ends empty on purpose, and
+      // an error there costs no answer the user waits for.
       if (
         this.provider === "opencode" &&
         response.stopReason === "end_turn" &&
@@ -1596,17 +1596,41 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
           thread,
           turn,
           "failed",
-          "OpenCode returned no response. Check the selected model's sign-in and billing in OpenCode, then retry or choose another model.",
+          sourceText(
+            turn.reasoned ? "error.provider.opencodeReasoningWithoutAnswer" : "error.provider.opencodeNoAnswer",
+          ),
         );
         return;
+      }
+      if (
+        this.provider === "antigravity" &&
+        !turn.providerError &&
+        !turn.stopped &&
+        response.stopReason === "end_turn"
+      ) {
+        // The server's SDK failed the prompt and sent its message as the answer (1.3.0). The text
+        // before the failure is the partial answer; the rest is the message.
+        const failureAt = turn.sdkFailureAt ?? (GEMINI_EXECUTION_ERROR_ANSWER.test(turn.text) ? 0 : null);
+        const failure = failureAt === null ? "" : turn.text.slice(failureAt).trim();
+        if (failureAt !== null) {
+          turn.providerError = geminiTurnFailure(failure || turn.text.trim());
+          turn.text = failure ? turn.text.slice(0, failureAt) : "";
+        }
       }
       const status =
         turn.stopped || response.stopReason === "cancelled"
           ? "interrupted"
           : response.stopReason === "end_turn"
-            ? "completed"
+            ? turn.providerError
+              ? "failed"
+              : "completed"
             : "failed";
-      yield* this.#completeTurn(thread, turn, status, status === "failed" ? response.stopReason : null);
+      yield* this.#completeTurn(
+        thread,
+        turn,
+        status,
+        status === "failed" ? (turn.providerError ?? response.stopReason) : null,
+      );
     } catch (error) {
       yield* this.#completeTurn(thread, turn, turn.stopped ? "interrupted" : "failed", turn.stopped ? null : error);
     }
@@ -1629,6 +1653,15 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
     const turn = thread.activeTurn;
     if (!turn || turn.completing) return;
     if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+      // Antigravity reports an exhausted quota as answer text and ends the turn as a success.
+      const quota = this.provider === "antigravity" ? GEMINI_QUOTA_CHUNK.exec(update.content.text) : null;
+      if (quota) {
+        turn.receivedOutput = true;
+        turn.providerError = sourceText("error.provider.antigravityRateLimited", {
+          detail: shownFailureDetail(quota[1]?.trim() ?? ""),
+        });
+        return;
+      }
       // A harness reports a dropped stream as answer text, and then sends the retried answer (#1471).
       // The report gets its own muted item, so it is not joined to the answer around it. When no
       // retried answer comes, the partial reply and the report become the answer.
@@ -1648,7 +1681,8 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       }
       // Antigravity keeps session/prompt open while background tasks run. Its text must not
       // wait for that response. A later tool/thought boundary can still classify it as commentary.
-      if (this.provider === "antigravity" && update.content.text) {
+      // Text after an SDK failure is the failure, which the turn reports when it ends.
+      if (this.provider === "antigravity" && update.content.text && turn.sdkFailureAt === null) {
         if (!turn.text)
           this.emit("notification", {
             method: "item/started",
@@ -1667,6 +1701,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       return;
     }
     if (update.sessionUpdate === "agent_thought_chunk" && update.content.type === "text") {
+      if (update.content.text.trim()) turn.reasoned = true;
       this.#appendThought(thread, turn, update.content.text);
       return;
     }
@@ -1872,6 +1907,9 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
     if (this.options.profileGeneration) return { outcome: { outcome: "cancelled" } };
     if (this.#historyReplays.has(params.sessionId)) return { outcome: { outcome: "cancelled" } };
     const thread = this.#threads.get(params.sessionId);
+    // The user stopped this Antigravity session, and its harness can still run until the resume.
+    // A tool that it asks for now must not run.
+    if (thread?.needsResume && !thread.activeTurn) return { outcome: { outcome: "cancelled" } };
     const turnId = thread?.activeTurn?.id ?? randomUUID();
     const kind =
       params.toolCall.kind === "execute"
@@ -2089,21 +2127,35 @@ function isSessionNotFound(error: unknown, sessionId: string, provider: AgentPro
   if (provider === "acp" && error.code === -32603) {
     return isRecord(error.data) && error.data.details === `Unsupported ACP session: ${sessionId}`;
   }
+  // Antigravity 1.3.0 has three exact forms: a load or resume puts the ID in data.sessionId, a
+  // configuration change uses the SDK's resource URI `session <id>`, and a prompt raises a plain
+  // error that the SDK wraps as an internal error.
+  if (provider === "antigravity") {
+    if (!isRecord(error.data)) return false;
+    if (error.code === -32603) return error.data.details === `Session not found: ${sessionId}`;
+    return error.code === -32002 && (error.data.sessionId === sessionId || error.data.uri === `session ${sessionId}`);
+  }
   if (error.code !== -32002) return false;
   const uri = isRecord(error.data) ? error.data.uri : undefined;
   return uri === sessionId || error.message.includes(sessionId);
 }
 
 /**
- * The text of a failed turn. When a handler in an ACP agent throws, the SDK answers `Internal error`
- * and puts the thrown message in `data.details`, which `String(error)` leaves out (#1193).
+ * The agent's explanation of a protocol error, which `String(error)` leaves out. When a handler in
+ * an ACP agent throws, the SDK puts the thrown message in `data.details` (#1193). Grok sends a string
+ * `data`, such as "session/resume does not support additionalDirectories" (#1729), or `data.detail`.
  */
+function failureDetail(error: RequestError): string | null {
+  const data = error.data;
+  const detail = typeof data === "string" ? data : isRecord(data) ? (data.details ?? data.detail) : undefined;
+  return typeof detail === "string" && detail ? detail : null;
+}
+
+/** The text of a failed request, with the agent's explanation. */
 function failureText(error: unknown): string {
-  if (!(error instanceof RequestError) || !isRecord(error.data)) return String(error);
-  const details = error.data.details;
-  return typeof details === "string" && details && !error.message.includes(details)
-    ? `${String(error)}: ${details}`
-    : String(error);
+  if (!(error instanceof RequestError)) return String(error);
+  const detail = failureDetail(error);
+  return detail && !error.message.includes(detail) ? `${String(error)}: ${detail}` : String(error);
 }
 
 /**
@@ -2119,6 +2171,20 @@ function isOpenCodeServiceFailure(error: unknown): boolean {
  * mid-response. The response above may be incomplete." Only the full report matches, so answer text
  * that starts with "API Error: " stays in the answer.
  */
+/** Antigravity 1.3.0's `quota_exhausted_message`: a fixed header, then the reset time. */
+const GEMINI_QUOTA_CHUNK = /^\s*Usage Limit Reached\n\n([\s\S]*)$/u;
+/** The stderr record that Antigravity 1.3.0 writes before it sends an SDK failure as answer text. */
+const GEMINI_SDK_FAILURE = /\bAntigravity SDK error processing prompt for session (\S+)/u;
+/** `format_execution_error` of Antigravity 1.3.0 when the failure is not a Google API error. */
+const GEMINI_EXECUTION_ERROR_ANSWER = /^\s*Agent execution error: /u;
+
+/** The message of a Gemini turn that the server failed but reported as answer text. */
+function geminiTurnFailure(text: string): string {
+  // Google's API answer for a refused key. The key is the user's to fix, not the request.
+  if (/\bAPI key not valid\b|\bAPI_KEY_INVALID\b/u.test(text)) return sourceText("error.provider.geminiKeyRefused");
+  const key = GEMINI_REQUEST_FAILURES.find(([, pattern]) => pattern.test(text))?.[0];
+  return key ? sourceText(key, { detail: shownFailureDetail(text) }) : shownFailureDetail(text);
+}
 const HARNESS_ERROR_CHUNK = /^\s*API Error: [^\n]*The response above may be incomplete\.\s*$/u;
 
 const OPENCODE_FAILURE_DETAIL_LIMIT = 200;

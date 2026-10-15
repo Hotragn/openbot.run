@@ -11,9 +11,10 @@ import type {
   ConversationSnapshot,
   HostedSiteConversationEventStatus,
 } from "@openbot/contracts/ipc";
+import { AgentHistoryQueries, type AgentHistorySelection } from "./database/agent-history-queries";
 import { type AgentModelChange, AgentRoster } from "./database/agent-roster";
 import { AgentUsage } from "./database/agent-usage";
-import { ConversationQueries } from "./database/conversation-queries";
+import { type ConversationMarkerExclusions, ConversationQueries } from "./database/conversation-queries";
 import { ConversationWriter } from "./database/conversation-writer";
 import { DatabaseCore, type OrchestrationEventInput } from "./database/database-core";
 import {
@@ -70,6 +71,7 @@ export class OpenBotDatabase {
   readonly #hostedSiteEvents: HostedSiteEventLog;
   readonly #mailbox: MailboxProjection;
   readonly #sessions: ProviderSessions;
+  readonly #agentHistory: AgentHistoryQueries;
   readonly #providerHistory: ProviderHistoryStore;
   readonly #summaries: ThreadSummaries;
 
@@ -82,6 +84,7 @@ export class OpenBotDatabase {
     this.#replay = new ThreadReplay({ core: this.#core, conversations: this.#conversations });
     this.#hostedSiteEvents = new HostedSiteEventLog({ core: this.#core });
     this.#mailbox = new MailboxProjection({ core: this.#core });
+    this.#agentHistory = new AgentHistoryQueries(this.#core);
     this.#sessions = new ProviderSessions({ core: this.#core });
     this.#providerHistory = new ProviderHistoryStore({ core: this.#core });
     this.#summaries = new ThreadSummaries({ core: this.#core });
@@ -194,6 +197,10 @@ export class OpenBotDatabase {
     return this.#conversations.readConversationRuntime(agentId, threadId);
   }
 
+  readAgentHistory(agentId: string, threadId: string, selection: AgentHistorySelection) {
+    return this.#agentHistory.read(agentId, threadId, selection);
+  }
+
   readConversationMessages(
     agentId: string,
     threadId: string | null,
@@ -215,11 +222,7 @@ export class OpenBotDatabase {
     threadId: string | null,
     anchor: ConversationPageAnchor = { type: "latest" },
     requestedLimit = 50,
-    options: {
-      excludeRoutineEvents?: boolean;
-      excludeRoutineRunEvents?: boolean;
-      excludeHostedSiteEvents?: boolean;
-    } = {},
+    options: ConversationMarkerExclusions = {},
   ): ConversationPage {
     return this.#conversations.readConversationPage(agentId, threadId, anchor, requestedLimit, options);
   }
@@ -227,11 +230,7 @@ export class OpenBotDatabase {
   supportedConversationCursor(
     threadId: string,
     throughMessageId: string | null,
-    options: {
-      excludeRoutineEvents?: boolean;
-      excludeRoutineRunEvents?: boolean;
-      excludeHostedSiteEvents?: boolean;
-    } = {},
+    options: ConversationMarkerExclusions = {},
   ): string | null {
     return this.#conversations.supportedConversationCursor(threadId, throughMessageId, options);
   }
@@ -405,6 +404,10 @@ export class OpenBotDatabase {
 
   listProviderSessions(threadId: string): ProviderSession[] {
     return this.#sessions.listProviderSessions(threadId);
+  }
+
+  listProviderSessionIds(externalSessionId?: string): string[] {
+    return this.#sessions.listProviderSessionIds(externalSessionId);
   }
 
   listExternalSessionIds(): string[] {

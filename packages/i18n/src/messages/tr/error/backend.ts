@@ -2,6 +2,11 @@ import type { PartialTranslation } from "../../../message";
 import type { messages as source } from "../../en/error/backend";
 
 export const messages = {
+  "error.backend.eventsUnavailable": "Bu ana makinede etkinlikler kullanılamıyor.",
+  "error.backend.webhookRouteLimit": "Bir ana makinede en fazla {limit} webhook rutini olabilir.",
+  "error.backend.webhookSettingsInvalid": "Webhook ayarlarını kontrol edin ve tekrar deneyin.",
+  "error.backend.webhookRouteUnavailable":
+    "Herkese açık webhook yolu hazır değil. Ana makine bağlantısını kontrol edin ve tekrar deneyin.",
   // Errors that the backend services send: channels, messages, routines, memories, MCP, browser and remote desktop.
   "error.backend.browserViewRemoteOnly": "Canlı tarayıcı görünümü yalnızca uzak bir ana makine içindir.",
   "error.backend.browserViewUnsupported": "Bu uzak ana makine canlı tarayıcı görünümünü desteklemiyor.",
@@ -49,6 +54,8 @@ export const messages = {
   "error.backend.channelNotFound": "Kanal bulunamadı.",
   "error.backend.channelMemberUnavailable": "Bir kanal üyesi kullanılamıyor.",
   "error.backend.channelArchived": "Mesaj göndermeden veya görevleri değiştirmeden önce bu kanalı geri yükleyin.",
+  "error.backend.channelsRetired":
+    "Kanallar artık desteklenmiyor. Birlikte çalışmaları için ajanları kenar çubuğunda aynı bölüme koyun.",
   "error.backend.channelReferenceUnavailable": "Referans verilen kanal mesajı kullanılamıyor.",
   "error.backend.channelTaskNotFound": "Kanal görevi bulunamadı.",
   "error.backend.channelTaskComplete": "Bu görev zaten tamamlandı.",
@@ -63,8 +70,18 @@ export const messages = {
   "error.backend.channelAssigneeUnavailable": "Atanan ajan kullanılamıyor.",
   "error.backend.channelAssignmentChanged": "Bu kanal ataması değişti.",
   "error.backend.channelMemberRequired": "Bu kanalın kullanılabilir bir üyesini seçin.",
+  "error.backend.memoryEssentialBudget":
+    "Temel bellekler istem sınırını aşıyor. Bir girdiyi gerektiğinde aranacak şekilde ayarlayın, ardından tekrar deneyin.",
+  "error.backend.memorySelectionConflict": "Bellek değişti. Yeniden yükleyin ve tekrar deneyin.",
+  "error.backend.memorySelectionUserControlled":
+    "Bu bellek seçimini kullanıcı yönetiyor. Kullanıcının seçimini koruyun.",
+  "error.backend.memorySearchQuery": "En fazla 256 karakterden oluşan bir veya daha fazla arama sözcüğü girin.",
+  "error.backend.memoryOperationFailed": "Bellek işlemi başarısız oldu. Tekrar deneyin.",
   "error.backend.memoryGone": "Bu bellek artık mevcut değil.",
   "error.backend.routineGone": "Bu rutin artık mevcut değil.",
+  "error.backend.turnNotStarted": "Sağlayıcı bu turu başlatmadı.",
+  "error.backend.routineResultConnectionOff": "Bu mesajlaşma bağlantısı kapalı veya kaldırılmış. Başka bir yer seçin.",
+  "error.backend.routineResultNoDelivery": "Bu çalıştırmanın yeniden gönderilecek bir yanıtı yok.",
   "error.backend.channelMemoryLimit": "Bir kanal en fazla {limit} belleğe sahip olabilir.",
   "error.backend.channelRoutineLimit": "Bir kanal en fazla {limit} rutine sahip olabilir.",
   "error.backend.agentRoutineLimit": "Bir ajan en fazla {limit} rutine sahip olabilir.",
@@ -118,6 +135,7 @@ export const messages = {
   "error.backend.routineCronTooOften": "Özel zamanlamalar her {minutes} dakikadan daha sık çalışmamalıdır.",
   "error.backend.routineAnchorInvalid": "Rutin aralık çıpası geçersiz.",
   "error.backend.routineNoOccurrence": "Zamanlama önümüzdeki beş yıl içinde hiçbir gerçekleşmeye sahip değil.",
+  "error.backend.routineOncePassed": "Bu tek seferlik rutinin zamanı geçti. Daha sonraki bir tarih veya saat seç.",
   "error.backend.routineTimezoneInvalid": "Rutin saat dilimi geçersiz.",
   "error.backend.routineCronFields": "Özel zamanlamalar beş cron alanı kullanmalıdır.",
   "error.backend.routineCronValueInvalid": "Cron {field} değeri geçersiz.",
@@ -135,6 +153,25 @@ export const messages = {
   "error.backend.memoryTextRequired": "Bellek metni gereklidir.",
   "error.backend.memoryTextTooLong": "Bellek metni çok uzun.",
   "error.backend.mcpServerGone": "Bu MCP sunucusu artık mevcut değil.",
+  "error.backend.routineFlowLinkGone": "Bu bağlantı artık yok.",
+  "error.backend.routineFlowSameAgent": "Bir ajan işi kendisine devredemez.",
+  "error.backend.routineFlowIntoOwner": "Rutin kendi ajanıyla başlıyor, bu nedenle o ajan başka bir ajandan iş alamaz.",
+  "error.backend.routineFlowNotOnPath": "Bu ajan henüz rutinin bir parçası değil. Önce onu rutine bağlayın.",
+  "error.backend.routineFlowDuplicate": "Bu ajanlar bu rutinde zaten bağlı.",
+  "error.backend.routineFlowCycle": "Bu bağlantı bir döngü oluşturur.",
+  "error.backend.routineFlowLinkLimit": "Bir rutinde en fazla {limit} bağlantı olabilir.",
+  "error.backend.agentWaitLimit":
+    "Bu ajanın zaten {count} açık beklemesi var. Başka bir bekleme açmadan önce openbot.close_wait ile bir beklemeyi kapatın.",
+  "error.backend.agentWaitGone": "Bu bekleme açık değil. Ajan onu kapattı veya biri iptal etti.",
+  "error.backend.agentWaitNoRequest": "Beklemenin devam etmesi için bir mesaj gerekir. Bu turda mesaj yok.",
+  "error.backend.agentWaitOwnChatOnly":
+    "Beklemeyi yalnızca kendi sohbetinizde açın. Bir kanal veya mesajlaşma görevi bekleyemez.",
+  "error.backend.agentWaitNoteRequired": "Beklemenin ne için olduğunu belirten kısa bir not yazın.",
+  "error.backend.agentWaitRoutineGone": "Bu ajanın bu kimliğe sahip bir rutini yok.",
+  "error.backend.agentWaitNoRoutine":
+    "Bir beklemeyi yalnızca rutinlerinizden birinin çalıştırılması uyandırır ve hiç rutininiz yok. openbot.create_routine ile bir rutin oluşturun, ardından beklemeyi açın.",
+  "error.backend.agentWaitRemoteUnsupported": "Açık beklemeler yalnızca bu bilgisayardaki ajanlar için kullanılabilir.",
+  "error.backend.routineFlowHandoffFailed": "Rutin işi bu ajana aktaramadı.",
   "error.backend.mcpServerLimit": "OpenBot en fazla {limit} MCP sunucusu tutar.",
   "error.backend.mcpServerNameTaken": "{name} adında bir MCP sunucusu zaten mevcut.",
   "error.backend.mcpServerNoAnswer": "Sunucu {seconds} saniye içinde yanıt vermedi.",
@@ -192,6 +229,7 @@ export const messages = {
   "error.backend.editSavedDifferent": "Bu düzenleme zaten farklı içerikle kaydedildi. Değişiklikleriniz kaydedilmedi.",
   "error.backend.useChannelTaskControlsWork": "Kanal çalışması için kanal görevi kontrollerini kullanın.",
   "error.backend.steerTurnChanged": "Bu mesaj yönlendirilmeden önce etkin tur değişti.",
+  "error.backend.steerUnsupported": "Bu sağlayıcı çalışan bir turu yönlendiremez. Mesajınız kuyrukta kalır.",
   "error.backend.steerQueuedOnly": "Yalnızca kuyruğa alınmış mesajlar yönlendirilebilir.",
   "error.backend.promptInactive": "Bu istem artık etkin değil.",
   "error.backend.promptAnswerMismatch": "Bir istem yanıtı etkin bir soruyla eşleşmiyor.",
@@ -228,4 +266,11 @@ export const messages = {
     "Sunucu {status} yanıtı verdi. API anahtarını veya diğer kimlik bilgilerini denetleyin.",
   "error.backend.mcpServerHttpUrl":
     "Sunucu {status} yanıtı verdi. URL'yi denetleyin. Bağlantı yanlış, süresi dolmuş veya silinmiş olabilir.",
+  "error.backend.mcpSignInAppUrl": "Oturum açma uygulaması için geçerli bir sunucu URL'si gerekir.",
+  "error.backend.mcpSignInAppClientId": "Oturum açma uygulamasının istemci kimliğini girin.",
+  "error.backend.mcpSignInAppIssuerChanged":
+    "Bu MCP sunucusunun oturum açma sunucusu değişti, bu yüzden OpenBot oturum açma uygulamasını ona göndermedi. Değişiklik doğruysa oturum açma uygulamasını kaldırıp yeniden ekleyin.",
+  "error.backend.mcpSignInAppNoServer":
+    "Oturum açma uygulaması eklemeden önce bu MCP sunucusunu URL sunucusu olarak kaydedin.",
+  "error.backend.mcpSignInAppUnavailable": "Bu bilgisayar oturum açma uygulaması saklayamaz.",
 } as const satisfies PartialTranslation<typeof source>;

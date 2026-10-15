@@ -8,25 +8,31 @@ import { type AgentSessionSettings, isAgentSessionSettings } from "@openbot/cont
 import {
   type AccountUsage,
   type AgentMemory,
+  type AgentMemorySelectionState,
   type AgentModelOption,
   type AgentStatus,
   type AgentSummary,
   type DuplicateAgentResult,
   decodeOptionalAgentAnalytics,
   decodeOptionalHostAnalytics,
+  type HostProviderAccounts,
   isAccountUsage,
   isAgentHostSettings,
   isAgentMemory,
+  isAgentMemorySelectionState,
   isAgentModelOption,
   isAgentProvider,
   isAgentStatus,
   isAgentSummary,
+  isProviderAccountId,
+  isProviderAccountStatus,
   isRoutine,
   isRoutineCalendar,
   isRoutineFeed,
   isRoutineRun,
   isSharedTable,
   isSidebarLayoutSnapshot,
+  MAX_PROVIDER_ACCOUNTS,
   type ProviderApiKeyState,
   type ProviderCodeLoginStart,
   type SharedTable,
@@ -97,6 +103,29 @@ export function decodeAccountUsageFromMain(value: unknown): AccountUsage {
   return value;
 }
 
+/** Main has already left out the providers that this build does not know, so each one must be known. */
+export function decodeHostProviderAccountsFromMain(value: unknown): HostProviderAccounts {
+  const invalid = () => new Error("Invalid provider accounts response.");
+  if (!isDynamicRecord(value) || !Array.isArray(value.providers) || !Array.isArray(value.agents)) throw invalid();
+  const providers = value.providers.map((row: unknown) => {
+    if (
+      !isDynamicRecord(row) ||
+      !isAgentProvider(row.provider) ||
+      !Array.isArray(row.accounts) ||
+      row.accounts.length > MAX_PROVIDER_ACCOUNTS ||
+      !row.accounts.every(isProviderAccountStatus)
+    )
+      throw invalid();
+    return { provider: row.provider, accounts: row.accounts };
+  });
+  const agents = value.agents.map((row: unknown) => {
+    if (!isDynamicRecord(row) || !isString(row.agentId) || !row.agentId || !isProviderAccountId(row.accountId))
+      throw invalid();
+    return { agentId: row.agentId, accountId: row.accountId };
+  });
+  return { providers, agents };
+}
+
 // Fails closed on a member for the same reason as `decodeAgentModelOptions` in the main process, and
 // it is the local half of the same payload: `isAgentModel` gaining square brackets is what stopped a
 // provider CLI's `claude-fable-5-1[1m]` from emptying this app's own model picker, not a decoder
@@ -153,6 +182,14 @@ export function decodeHostAnalyticsFromMain(value: unknown) {
   return decodeOptionalHostAnalytics(value);
 }
 
+export function decodeMemorySelection(value: unknown): AgentMemorySelectionState {
+  if (!isAgentMemorySelectionState(value)) throw new Error("Invalid agent memory selection response.");
+  return value;
+}
+
+export function decodeOptionalMemorySelection(value: unknown): AgentMemorySelectionState | null {
+  return value === null ? null : decodeMemorySelection(value);
+}
 export function decodeAgentSessionSettingsFromMain(value: unknown): AgentSessionSettings {
   if (!isAgentSessionSettings(value)) throw new Error("Invalid session settings response.");
   return value;

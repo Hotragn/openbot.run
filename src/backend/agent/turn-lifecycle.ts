@@ -58,6 +58,7 @@ import { collectProviderUsage } from "./usage-collection";
 import { USAGE_LIMIT_METHOD, type UsageLimitGate } from "./usage-limit-gate";
 
 const logger = createOpenBotLogger("turn-lifecycle");
+const ENDED_TURN_LIMIT = 256;
 
 export interface AgentBrowserHost extends AttentionBrowserHost, BrowserUploadTarget {
   onChanged(listener: (tabs: BrowserTab[], activeTabId: string | null) => void): () => void;
@@ -94,7 +95,7 @@ export interface TurnHooks {
   requeueChannelDelivery(deliveryId: string): Effect.Effect<boolean>;
   /**
    * Whether this delivery is a routine run that may end without a message: a scheduled run whose
-   * agent answers only the no-update marker.
+   * agent answers only the no-update marker or calls the no-update tool.
    */
   quietRoutineDelivery(deliveryId: string): boolean;
   /**
@@ -145,6 +146,7 @@ export class TurnLifecycle {
   readonly #hooks: TurnHooks;
   readonly fileHistory = new ThreadFileHistory();
   readonly #failedTurns = new Map<string, string>();
+  readonly #observedCompactions = new Map<string, string>();
   readonly #itemTurns = new Map<string, string>();
   #scope = Scope.makeUnsafe();
   readonly #turnAssociations = new Map<string, Deferred.Deferred<void, TurnOperationFailed>>();
@@ -178,6 +180,13 @@ export class TurnLifecycle {
   readonly #limitedTurns = new Map<string, number | null>();
   /** The deliveries run again after a refused session history. Each one gets a single retry. */
   readonly #refusedRetries = new Set<string>();
+  /** Running turns whose agent called the no-update tool. The completion of the turn takes the entry. */
+  readonly #noUpdateTurns = new Set<string>();
+  /**
+   * The newest turns that ended. A provider can end a turn before the drain reads its `turn/start`
+   * answer, and the drain must not then mark the turn active again. Past the cap, the oldest goes.
+   */
+  readonly #endedTurns = new Set<string>();
   /**
    * The time of the last provider notification for each agent: a delta, a tool item, a usage
    * update. It is the only clock that moves while a turn works, and it is lost on restart.
@@ -249,9 +258,12 @@ export class TurnLifecycle {
     this.#turnErrors.clear();
     this.#limitedTurns.clear();
     this.#runningTurns.clear();
+    this.#noUpdateTurns.clear();
+    this.#endedTurns.clear();
     this.#refusedRetries.clear();
     this.#lastEventAt.clear();
     this.#itemTurns.clear();
+    this.#observedCompactions.clear();
   }).bind(this);
 
   /**
@@ -259,15 +271,30 @@ export class TurnLifecycle {
    * sign-out that an account refresh found, or a new client for the same provider. The stopped
    * process sends no `turn/completed` and `#handleExit` skips it, so without this its turns stay
    * active, and its deliveries running, until OpenBot restarts.
+   *
+   * `keepRecoverable` is for a client whose process exited. A turn with a message that is not settled
+   * then stays for the delivery recovery, which reads the provider's history for its result and ends
+   * the turn. A turn with no such message, such as one the CLI started by itself, has no other way
+   * to end.
    */
   readonly interruptTurnsOf = Effect.fn("TurnLifecycle.interruptTurnsOf")(function* (
     this: TurnLifecycle,
     client: AgentClient,
+    options: { keepRecoverable?: boolean } = {},
   ) {
     for (const [turnId, turn] of this.#runningTurns) {
       if (turn.client !== client) continue;
       this.#runningTurns.delete(turnId);
+      if (
+        options.keepRecoverable &&
+        this.#mailbox
+          .findDeliveriesByTurn(turn.agentId, turnId)
+          .some(({ delivery }) => delivery.status === "starting" || delivery.status === "running")
+      )
+        continue;
       this.#attention.clearForTurn(turn.threadId, turnId);
+      if (this.#observedCompactions.get(turn.threadId) === turnId) this.#observedCompactions.delete(turn.threadId);
+      this.#compaction.abandonCompaction(turn.threadId);
       yield* this.#completeTurn(turn.agentId, turn.threadId, turnId, "interrupted").pipe(
         Effect.catch((failure) =>
           Effect.sync(() => this.#hooks.emitError("turn_completion_failed", failure.cause, turn.agentId)),
@@ -275,6 +302,10 @@ export class TurnLifecycle {
       );
     }
   }).bind(this);
+
+  hasEnded(turnId: string): boolean {
+    return this.#endedTurns.has(turnId);
+  }
 
   readonly handleNotification = Effect.fn("TurnLifecycle.handleNotification")(function* (
     this: TurnLifecycle,
@@ -317,7 +348,10 @@ export class TurnLifecycle {
         const turnId = getString(turn, "id");
         if (!turnId) return;
         if (this.#compaction.claimTurn(agentId, threadId, turnId)) return;
-        const starting = this.#mailbox.startingDeliveryForAgent(agentId)?.delivery;
+        this.#compaction.beginTurn(threadId);
+        // The provider started this turn itself. A delivery that is starting now waits for its own turn.
+        const unprompted = isRecord(params) && params.unprompted === true;
+        const starting = unprompted ? undefined : this.#mailbox.startingDeliveryForAgent(agentId)?.delivery;
         const sentAt = starting ? Date.parse(starting.createdAt) : Number.NaN;
         this.#runningTurns.set(turnId, {
           client: source,
@@ -334,13 +368,15 @@ export class TurnLifecycle {
         snapshot.activeTurnId = turnId;
         this.#failedTurns.delete(agentId);
         const origin = starting?.sender.kind ?? "unknown";
-        const association = Deferred.makeUnsafe<void, TurnOperationFailed>();
-        this.#turnAssociations.set(turnId, association);
-        yield* Effect.gen({ self: this }, function* () {
-          const exit = yield* Effect.exit(this.#associateStartedTurn(agentId, turnId, snapshot));
-          yield* Deferred.done(association, exit);
-          if (this.#turnAssociations.get(turnId) === association) this.#turnAssociations.delete(turnId);
-        }).pipe(Effect.forkIn(this.#scope, { startImmediately: true }));
+        if (!unprompted) {
+          const association = Deferred.makeUnsafe<void, TurnOperationFailed>();
+          this.#turnAssociations.set(turnId, association);
+          yield* Effect.gen({ self: this }, function* () {
+            const exit = yield* Effect.exit(this.#associateStartedTurn(agentId, turnId, snapshot));
+            yield* Deferred.done(association, exit);
+            if (this.#turnAssociations.get(turnId) === association) this.#turnAssociations.delete(turnId);
+          }).pipe(Effect.forkIn(this.#scope, { startImmediately: true }));
+        }
         this.#hooks.emit({ type: "turn-started", agentId, threadId: publicThreadId, turnId, origin });
         this.#conversation.emitConversation(snapshot, "turn.started", { turnId });
         return;
@@ -360,6 +396,14 @@ export class TurnLifecycle {
         if (itemId) this.#itemTurns.set(itemId, turnId);
         this.#markProduced(turnId, isRepeatedWork(item));
         if (item.type === "contextCompaction") {
+          if (this.#conversation.loadedClientFor(threadId) !== source) return;
+          if (notification.method === "item/started") this.#observedCompactions.set(threadId, turnId);
+          else this.#observedCompactions.delete(threadId);
+          if (!this.#compaction.isCompactionTurn(threadId, turnId))
+            this.#compaction.observeCompaction(
+              threadId,
+              notification.method === "item/completed" ? "completed" : "running",
+            );
           if (notification.method === "item/completed") {
             this.#compaction.markCompacted(threadId);
           }
@@ -444,6 +488,10 @@ export class TurnLifecycle {
           });
         }
         this.#attention.clearForTurn(threadId, turnId);
+        if (this.#observedCompactions.get(threadId) === turnId) {
+          this.#observedCompactions.delete(threadId);
+          this.#compaction.observeCompaction(threadId, status === "completed" ? "completed" : "failed");
+        }
         if (this.#compaction.isCompactionTurn(threadId, turnId)) {
           this.#compaction.finish(agentId, threadId, status);
           return;
@@ -457,7 +505,27 @@ export class TurnLifecycle {
       }
       case "thread/tokenUsage/updated": {
         if (!threadId || !agentId) return;
+        if (this.#conversation.loadedClientFor(threadId) !== source) return;
         this.#compaction.updateBudget(threadId, params);
+        const usage = getRecord(params, "tokenUsage");
+        const last = getRecord(usage, "last");
+        if (typeof last?.totalTokens === "number" && typeof usage?.modelContextWindow === "number")
+          this.#compaction.observeUsage(
+            threadId,
+            last.totalTokens,
+            usage.modelContextWindow,
+            source.contextCompaction === "native",
+            source.contextCompaction === "events" || source.contextCompaction === "request" ? 0.8 : null,
+            usage.estimated === true,
+          );
+        return;
+      }
+      case "openbot/context-compaction": {
+        if (!threadId || !agentId || this.#conversation.loadedClientFor(threadId) !== source) return;
+        const status = getString(params, "status");
+        if (status !== "running" && status !== "completed" && status !== "failed") return;
+        // Native Claude compaction does not report comparable full-context counts.
+        this.#compaction.observeCompaction(threadId, status, "none");
         return;
       }
       case "thread/archived": {
@@ -535,6 +603,30 @@ export class TurnLifecycle {
     }
   }).bind(this);
 
+  /**
+   * Records a call to the no-update tool. `quiet` when the turn runs only quiet routine runs, so
+   * its completion keeps the text answers as quiet answers; `shown` when a person waits for the answer, as in a Test
+   * run; null when no routine run started the turn. The completion decides again, because a message
+   * can join the turn after the call.
+   */
+  requestNoUpdate(agentId: string, threadId: string, turnId: string): "quiet" | "shown" | null {
+    const deliveries = this.#mailbox.findDeliveriesByTurn(agentId, turnId);
+    if (!deliveries.some(({ delivery }) => delivery.sender.kind === "routine")) return null;
+    this.#noUpdateTurns.add(turnId);
+    return this.#quietRoutineTurn(threadId, deliveries) ? "quiet" : "shown";
+  }
+
+  /** Only a turn that runs nothing but quiet routine runs, outside a channel or messaging thread. */
+  #quietRoutineTurn(threadId: string | null, deliveries: readonly DeliveryContext[]): boolean {
+    return (
+      deliveries.length > 0 &&
+      !this.#conversation.isExecutionThread(threadId) &&
+      deliveries.every(
+        ({ delivery }) => delivery.sender.kind === "routine" && this.#hooks.quietRoutineDelivery(delivery.id),
+      )
+    );
+  }
+
   readonly #completeTurn = Effect.fn("TurnLifecycle.completeTurn")(function* (
     this: TurnLifecycle,
     agentId: string,
@@ -544,6 +636,12 @@ export class TurnLifecycle {
   ) {
     const running = this.#runningTurns.get(turnId);
     this.#runningTurns.delete(turnId);
+    this.#endedTurns.add(turnId);
+    if (this.#endedTurns.size > ENDED_TURN_LIMIT) {
+      const [oldest] = this.#endedTurns;
+      if (oldest !== undefined) this.#endedTurns.delete(oldest);
+    }
+    const noUpdateCalled = this.#noUpdateTurns.delete(turnId);
     if (running) {
       // `waitMs` is OpenBot's part of a slow reply: the queue (a usage-limit hold included), the
       // provider start, the session and its settings. `firstOutputMs` is the provider's: the time
@@ -636,16 +734,12 @@ export class TurnLifecycle {
     if (deliveries.some((delivery) => delivery.delivery.sender.kind === "agent")) {
       dropPlaceholderAnswers(snapshot, turnId);
     }
-    // Only a turn that ran nothing but scheduled routine runs: a person who wrote in the same turn,
-    // or who started a Test, script or webhook run, waits for the answer.
+    // Only a turn that ran nothing but scheduled, script or webhook runs: a person who wrote in the
+    // same turn, or who started a Test run, waits for the answer.
     const quiet =
       outcome === "completed" &&
-      deliveries.length > 0 &&
-      !this.#conversation.isExecutionThread(snapshot.threadId) &&
-      deliveries.every(
-        ({ delivery }) => delivery.sender.kind === "routine" && this.#hooks.quietRoutineDelivery(delivery.id),
-      ) &&
-      settleQuietRoutineTurn(snapshot, turnId);
+      this.#quietRoutineTurn(snapshot.threadId, deliveries) &&
+      settleQuietRoutineTurn(snapshot, turnId, noUpdateCalled);
     const latestAssistant = latestTurnAnswer(snapshot.messages, turnId);
     if (deliveries.length > 0) {
       const terminal = outcome === "failed" ? "failed" : outcome === "interrupted" ? "interrupted" : "completed";

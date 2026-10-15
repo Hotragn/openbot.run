@@ -21,6 +21,8 @@ export interface ServerConnectionIssue {
   code: ServerConnectionIssueCode;
   message: string;
   retryable: boolean;
+  /** A short code a user can copy into a report, such as `signal/host_busy`. */
+  reference?: string;
 }
 
 export interface ServerCompatibility {
@@ -74,6 +76,8 @@ export interface ServerSummary {
   active: boolean;
   /** The active members that the host allows. Absent when the account server did not give one. */
   memberLimit?: number;
+  /** A hosted server, which its owner and its admins can restart. Absent when the account server did not say. */
+  hosted?: boolean;
   compatibility?: ServerCompatibility | null;
   issue?: ServerConnectionIssue | null;
   connectionSequence?: number;

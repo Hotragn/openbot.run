@@ -2,6 +2,14 @@ import type { PartialTranslation } from "../../../message";
 import type { messages as source } from "../../en/mobile/agent";
 
 export const messages = {
+  "mobile.agent.session.title": "Настройки провайдера",
+  "mobile.agent.session.failed": "Не удалось изменить настройки провайдера.",
+  "mobile.agent.session.readFailed": "Не удалось прочитать настройки провайдера.",
+  "mobile.agent.session.unsupported": "Этот хост не поддерживает настройки провайдера.",
+  "mobile.agent.session.reset": "Сбросить {name}",
+  "mobile.agent.session.unavailable":
+    "Сохранённое значение {value} недоступно. Выберите другое значение или сбросьте его.",
+  "mobile.agent.session.pending": "Изменения вступят в силу на следующем ходе.",
   "mobile.agent.pin.pin": "Закрепить",
   "mobile.agent.pin.unpin": "Открепить",
   "mobile.agent.pin.pinNamed": "Закрепить: {name}",
@@ -220,7 +228,6 @@ export const messages = {
   "mobile.agent.webhook.activity.ignoredEventType": "Пропущено: другой тип события",
   "mobile.agent.webhook.activity.ignoredFilter": "Пропущено: фильтры не совпали",
   "mobile.agent.webhook.activity.ignoredInactive": "Пропущено: регулярная задача приостановлена",
-  "mobile.agent.record.channelInstructionsPlaceholder": "Опишите, что должен делать этот канал.",
   "mobile.agent.record.agentInstructionsPlaceholder": "Опишите, что должен делать этот агент.",
   "mobile.agent.record.schedule.daily": "Каждый день",
   "mobile.agent.record.schedule.weekdays": "По будням",
@@ -253,7 +260,6 @@ export const messages = {
   "mobile.agent.record.lateMonthDay": "Месяцы без {day}-го числа пропускаются.",
   "mobile.agent.record.cronHint":
     "Пять полей: минута, час, день месяца, месяц и день недели. Например, 0 9 * * 1-5 запускает задачу в 9:00 по будням.",
-  "mobile.agent.record.problem.once": "Одноразовую регулярную задачу пока нельзя сохранить.",
   "mobile.agent.record.problem.endBeforeStart": "Время окончания должно быть позже времени начала.",
   "mobile.agent.record.problem.invalidDate": "В этом месяце нет такого дня.",
   "mobile.agent.record.problem.cronRequired": "Введите выражение cron.",
@@ -280,6 +286,9 @@ export const messages = {
   "mobile.agent.advanced.title": "Дополнительно",
   "mobile.agent.runtime.unavailable": "Недоступно",
   "mobile.agent.runtime.provider": "Провайдер",
+  "mobile.agent.runtime.account": "Аккаунт",
+  "mobile.agent.runtime.accountNumbered": "Аккаунт {number}",
+  "mobile.agent.runtime.accountUnsupported": "Этот хост не позволяет менять аккаунт агента с удалённого устройства.",
   "mobile.agent.runtime.model": "Модель",
   "mobile.agent.runtime.reasoning": "Рассуждение",
   "mobile.agent.runtime.effort.low": "Низкое",
@@ -498,7 +507,6 @@ export const messages = {
   "mobile.agent.home.connecting": "Подключение к серверу",
   "mobile.agent.home.loadingServers": "Загрузка серверов",
   "mobile.agent.home.addAgent": "Добавить агента",
-  "mobile.agent.home.newChannel": "Новый канал",
   "mobile.agent.home.retrySections": "Повторить загрузку разделов",
   "mobile.agent.home.serversFailed": "Не удалось загрузить серверы",
   "mobile.agent.home.serversFailedBody": "Убедитесь, что настольное приложение запущено, и повторите попытку.",
@@ -515,4 +523,13 @@ export const messages = {
   "mobile.agent.home.markAllRead": "Отметить все прочитанными",
   "mobile.agent.route.appearance": "Внешний вид",
   "mobile.agent.route.cropPhoto": "Перемещение и масштаб",
+  "mobile.agent.info.memory.inclusion.label": "Использование памяти",
+  "mobile.agent.info.memory.inclusion.essential": "Всегда включать",
+  "mobile.agent.info.memory.inclusion.searchable": "Искать при необходимости",
+  "mobile.agent.info.memory.inclusion.automatic": "Решает агент",
+  "mobile.agent.info.memory.inclusion.userControlled": "Выбрано вами",
+  "mobile.agent.info.memory.inclusion.agentControlled": "Агент может это изменить",
+  "mobile.agent.info.memory.inclusion.explanation":
+    "Все записи памяти сохраняются. В каждый промпт попадают только важные записи. Остальные агент может найти поиском.",
+  "mobile.agent.info.memory.inclusion.capacity": "Объём важной памяти: {used} из {total}",
 } as const satisfies PartialTranslation<typeof source>;

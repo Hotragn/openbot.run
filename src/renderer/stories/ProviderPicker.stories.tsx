@@ -4,6 +4,7 @@ import { ProviderPicker } from "@openbot/ui/components/ProviderPicker";
 import { createSignal } from "solid-js";
 import { fn } from "storybook/test";
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { createFakeConnection } from "./provider-connection-fixture";
 
 const options: ProviderPickerOption[] = [
   {
@@ -47,6 +48,34 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Available: Story = {};
+
+/** Select Connect on Codex: after 25 s of `connecting`, the row offers the code sign-in. */
+export const BrowserSignInStalled: Story = {
+  args: {
+    allowUnavailableSelection: true,
+    onSignInProvider: fn(),
+  },
+  render: (args) => {
+    const [connecting, setConnecting] = createSignal(false);
+    const connection = createFakeConnection({ browser: () => void setConnecting(true), finishAfterMs: 0 });
+    return (
+      <ProviderPicker
+        {...args}
+        options={options.map((option) =>
+          option.id === "codex"
+            ? {
+                ...option,
+                state: "sign-in-required",
+                email: null,
+                connectionState: connecting() ? "connecting" : undefined,
+              }
+            : option,
+        )}
+        connection={connection}
+      />
+    );
+  },
+};
 
 export const Embedded: Story = {
   args: { embedded: true, label: undefined },
@@ -124,7 +153,7 @@ export const UserOwnedCliUpdate: Story = {
           }
         : option,
     ),
-    onConnectProvider: fn(),
+    connection: createFakeConnection({ browser: fn(), alternative: [] }),
     onUpdateProvider: fn(),
   },
 };
@@ -266,4 +295,53 @@ export const ProviderSwitchError: Story = {
       save={() => Promise.reject(new Error("OpenBot could not change the provider setting."))}
     />
   ),
+};
+
+/**
+ * Codex has two accounts, so its row lists them under the provider with the agents that use each.
+ * Claude has one, so its row shows the provider name and offers Add account.
+ */
+export const ProviderAccounts: Story = {
+  args: {
+    embedded: true,
+    label: undefined,
+    hint: undefined,
+    options: [
+      {
+        id: "codex",
+        name: "Codex",
+        state: "available",
+        accounts: [
+          {
+            id: "default",
+            label: "Work",
+            email: "person@example.com",
+            state: "available",
+            message: null,
+            usedBy: ["Ada"],
+          },
+          {
+            id: "a0123456789abcdef",
+            label: null,
+            email: "person@home.example",
+            state: "available",
+            message: null,
+            usedBy: ["Rex", "Mila"],
+          },
+        ],
+      },
+      {
+        id: "claude",
+        name: "Claude",
+        state: "available",
+        email: "person@example.com",
+        accounts: [{ id: "default", label: null, email: "person@example.com", state: "available", message: null }],
+      },
+    ],
+    accountActions: {
+      connect: fn(async () => undefined),
+      rename: fn(async () => undefined),
+      remove: fn(async () => undefined),
+    },
+  },
 };

@@ -2,6 +2,14 @@ import type { PartialTranslation } from "../../message";
 import type { messages as source } from "../en/agentSettings";
 
 export const messages = {
+  "agentSettings.session.title": "Настройки провайдера",
+  "agentSettings.session.readFailed": "Не удалось прочитать настройки провайдера.",
+  "agentSettings.session.pending": "Сохранённые изменения вступят в силу перед следующим ходом.",
+  "agentSettings.session.unavailable":
+    "Сохранённое значение {value} недоступно. Выберите другое значение или сбросьте его.",
+  "agentSettings.session.effective": "Текущее значение у провайдера: {value}",
+  "agentSettings.session.reset": "Сбросить параметр",
+  "agentSettings.session.resetNamed": "Сбросить {name}",
   "agentSettings.label": "Настройки агента",
   "agentSettings.title": "Настройки",
   "agentSettings.backToDetails": "Назад к описанию",
@@ -9,6 +17,32 @@ export const messages = {
   "agentSettings.backToSettings": "Назад к настройкам",
   "agentSettings.permissions.title": "Разрешения",
   "agentSettings.advanced.title": "Дополнительно",
+  "agentSettings.backupModels.title": "Резервные модели",
+  "agentSettings.backupModels.valueAsk": "Сначала спросить",
+  "agentSettings.backupModels.valueAutomatic": "Автоматически",
+  "agentSettings.backupModels.valueCount": {
+    one: "{mode} · {count}",
+    few: "{mode} · {count}",
+    many: "{mode} · {count}",
+    other: "{mode} · {count}",
+  },
+  "agentSettings.backupModels.intro":
+    "Если {model} достигнет лимита использования до того, как {name} начнёт писать, {name} спросит вас, какую модель использовать.",
+  "agentSettings.backupModels.introAutomatic":
+    "Если {model} достигнет лимита использования до того, как {name} начнёт писать, {name} переключится на первую доступную модель по порядку.",
+  "agentSettings.backupModels.ask": "Спрашивать перед переключением",
+  "agentSettings.backupModels.order": "Порядок",
+  "agentSettings.backupModels.listLabel": "Резервные модели по порядку",
+  "agentSettings.backupModels.empty": "Порядок не задан. {name} предлагает каждую доступную модель.",
+  "agentSettings.backupModels.add": "Добавить резервную модель",
+  "agentSettings.backupModels.moveUp": "Переместить {model} вверх",
+  "agentSettings.backupModels.moveDown": "Переместить {model} вниз",
+  "agentSettings.backupModels.remove": "Удалить {model}",
+  "agentSettings.backupModels.limited": "Лимит использования исчерпан · пропущена",
+  "agentSettings.backupModels.unavailable": "Сейчас недоступна · пропущена",
+  "agentSettings.backupModels.withAccount": "{model} · {account}",
+  "agentSettings.backupModels.note":
+    "После начала ответа {name} не переключает модель. Когда лимит закончится, {name} вернётся к {model}.",
   "agentSettings.groups.brain": "Мозг",
   "agentSettings.groups.knows": "Знает",
   "agentSettings.groups.does": "Делает",

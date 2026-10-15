@@ -43,6 +43,12 @@ export const PLUGIN_CATALOG_INDEX: PluginCatalogIndex = {
       detailSha256: "8b66d2a108340a79e398bedc19efc7dad2914b0addf17c76ee9fc50b72b09c1b",
     },
     {
+      slug: "cobrain",
+      version: "1.0.0",
+      featured: false,
+      detailSha256: "039484cf64fa35ef8f5ef9a04630166337d1f63b840f4c7552c2612c22edac20",
+    },
+    {
       slug: "figma",
       version: "1.1.0",
       featured: true,
@@ -59,6 +65,12 @@ export const PLUGIN_CATALOG_INDEX: PluginCatalogIndex = {
       version: "1.0.0",
       featured: false,
       detailSha256: "4fc370192c4c20834039fbdce4c5deb76f1553690136488aed99df5d9acdd191",
+    },
+    {
+      slug: "vercel",
+      version: "1.0.0",
+      featured: false,
+      detailSha256: "7e5ead435028c8e74d1e4bf84e7e61bc4216de8d0636a862d160e48391589253",
     },
     {
       slug: "context7",
@@ -284,6 +296,40 @@ export const PLUGIN_CATALOG_DETAILS: Record<string, PluginCatalogDetail> = {
     termsUrl: "https://www.notion.so/terms",
     skills: [],
   },
+  cobrain: {
+    slug: "cobrain",
+    name: "Cobrain",
+    tagline: "Shared memory for your AI agents",
+    description:
+      "Cobrain is a Markdown memory that every AI you connect can read and write. Agents load the context of a client or project before working, search past notes and decisions, and save what they learn so the next thread starts where the last one ended. Each user signs in to their own Cobrain account.",
+    category: "productivity",
+    creatorName: "cobrain.space",
+    iconUrl: "https://cobrain.space/apple-icon.png",
+    version: "1.0.0",
+    prompts: [
+      { id: "prompt-start-session", text: "Load my Cobrain context for this project before we start." },
+      { id: "prompt-search-decision", text: "Search my Cobrain notes for what we decided about pricing." },
+      { id: "prompt-save-note", text: "Save a note in Cobrain with what we did today and what is left." },
+    ],
+    apps: [
+      {
+        id: "app-cobrain-mcp",
+        name: "Cobrain",
+        description: "Read, search and write notes in your Cobrain brain over one MCP server.",
+        iconUrl: "https://cobrain.space/apple-icon.png",
+        server: {
+          name: "cobrain",
+          transport: "http",
+          url: "https://cobrain.space/mcp",
+          auth: [{ id: "cobrain-oauth", kind: "link", label: "Sign in" }],
+        },
+      },
+    ],
+    websiteUrl: "https://cobrain.space",
+    privacyPolicyUrl: "https://cobrain.space/privacy",
+    termsUrl: "https://cobrain.space/terms",
+    skills: [],
+  },
   figma: {
     slug: "figma",
     name: "Figma",
@@ -399,6 +445,41 @@ export const PLUGIN_CATALOG_DETAILS: Record<string, PluginCatalogDetail> = {
     websiteUrl: "https://sentry.io",
     privacyPolicyUrl: "https://sentry.io/privacy/",
     termsUrl: "https://sentry.io/terms/",
+    skills: [],
+  },
+  vercel: {
+    slug: "vercel",
+    name: "Vercel",
+    tagline: "Deployments, build logs and projects",
+    description:
+      "Vercel lets agents list projects and recent deployments, read build and runtime logs, and find why a build failed. Each user signs in to their own Vercel account through the browser and chooses the teams that agents can use. In those teams, agents get the same rights as the user's account. They can also change environment variables, domains, DNS records and deployments, and buy domains.",
+    category: "coding",
+    creatorName: "vercel.com",
+    iconUrl: "https://vercel.com/favicon.ico",
+    version: "1.0.0",
+    prompts: [
+      { id: "prompt-failed-build", text: "Why did the last production deployment fail?" },
+      { id: "prompt-recent-deployments", text: "List the deployments from today and their status." },
+      { id: "prompt-runtime-errors", text: "Which routes had runtime errors in the last hour?" },
+    ],
+    apps: [
+      {
+        id: "app-vercel-mcp",
+        name: "Vercel",
+        description:
+          "Projects, deployments, build logs, and runtime logs, over Vercel's MCP server with browser sign-in.",
+        iconUrl: "https://vercel.com/favicon.ico",
+        server: {
+          name: "vercel",
+          transport: "http",
+          url: "https://mcp.vercel.com",
+          auth: [{ id: "vercel-oauth", kind: "link", label: "Sign in" }],
+        },
+      },
+    ],
+    websiteUrl: "https://vercel.com",
+    privacyPolicyUrl: "https://vercel.com/legal/privacy-notice",
+    termsUrl: "https://vercel.com/legal/terms",
     skills: [],
   },
   context7: {

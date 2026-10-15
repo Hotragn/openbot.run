@@ -13,6 +13,8 @@ export interface DiagnosticOrigin {
 
 export interface AgentClient {
   readonly provider: AgentProvider;
+  /** Explicit completion contract; missing capability means unsupported. */
+  readonly contextCompaction?: "events" | "request" | "native" | "unsupported";
   readonly running: boolean;
   readonly readHistory?: ReadProviderHistory;
   /** False when stopping this client would lose a live provider session with no recovery path. */
@@ -76,6 +78,16 @@ export class RequestTimeoutError extends Error {
     readonly method: string,
   ) {
     super(`${providerName} request timed out: ${method}`);
+  }
+}
+
+/**
+ * The provider started a turn of its own, such as after a background task ended, before this turn
+ * could start. Nothing ran, so the caller queues the message again for when that turn ends.
+ */
+export class ProviderTurnActiveError extends Error {
+  constructor(readonly providerName: string) {
+    super(`${providerName} is in a turn that it started itself.`);
   }
 }
 

@@ -35,7 +35,9 @@ session=$(dbus-launch --sh-syntax)
 eval "$session"
 # The lock of the last run stays in the container too.
 rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
-Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
+# The subshell exits at once, so tini adopts Xvfb. As a child of OpenBot, Xvfb would get the high OOM
+# value of the agent processes, and OpenBot stops when the kernel kills its display.
+(Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &)
 export DISPLAY=:0
 for _ in $(seq 1 100); do
   xdpyinfo >/dev/null 2>&1 && break
@@ -66,5 +68,11 @@ started=$(gnome-keyring-daemon --start --components=secrets)
 eval "$started"
 export GNOME_KEYRING_CONTROL
 
+# Chromium keeps its shared memory in /dev/shm. Some runtimes, such as Kubernetes, give only 64 MB
+# and have no --shm-size. Below 1 GiB, Chromium keeps that memory in /tmp.
+chromium=()
+shm=$(df --output=size -k /dev/shm 2>/dev/null | tail -n 1 | tr -d ' ') || shm=0
+[ "${shm:-0}" -ge 1048576 ] 2>/dev/null || chromium+=(--disable-dev-shm-usage)
+
 export OPENBOT_SERVER=1
-exec /opt/OpenBot/app/openbot --password-store=gnome-libsecret
+exec /opt/OpenBot/app/openbot --password-store=gnome-libsecret "${chromium[@]}"

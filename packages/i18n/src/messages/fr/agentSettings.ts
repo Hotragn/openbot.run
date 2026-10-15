@@ -2,6 +2,14 @@ import type { PartialTranslation } from "../../message";
 import type { messages as source } from "../en/agentSettings";
 
 export const messages = {
+  "agentSettings.session.title": "Réglages du fournisseur",
+  "agentSettings.session.readFailed": "Impossible de lire les réglages du fournisseur.",
+  "agentSettings.session.pending": "Les modifications enregistrées s’appliquent avant le prochain tour.",
+  "agentSettings.session.unavailable":
+    "La valeur enregistrée {value} n’est pas disponible. Sélectionnez une autre valeur ou réinitialisez-la.",
+  "agentSettings.session.effective": "Valeur actuelle du fournisseur : {value}",
+  "agentSettings.session.reset": "Réinitialiser le réglage",
+  "agentSettings.session.resetNamed": "Réinitialiser {name}",
   "agentSettings.label": "Réglages de l’agent",
   "agentSettings.title": "Réglages",
   "agentSettings.backToDetails": "Retour aux détails",
@@ -9,6 +17,27 @@ export const messages = {
   "agentSettings.backToSettings": "Retour aux paramètres",
   "agentSettings.permissions.title": "Autorisations",
   "agentSettings.advanced.title": "Avancé",
+  "agentSettings.backupModels.title": "Modèles de secours",
+  "agentSettings.backupModels.valueAsk": "Demander d’abord",
+  "agentSettings.backupModels.valueAutomatic": "Automatique",
+  "agentSettings.backupModels.valueCount": { one: "{mode} · {count}", other: "{mode} · {count}" },
+  "agentSettings.backupModels.intro":
+    "Quand {model} atteint sa limite d’utilisation avant que {name} commence à écrire, {name} vous demande quel modèle utiliser.",
+  "agentSettings.backupModels.introAutomatic":
+    "Quand {model} atteint sa limite d’utilisation avant que {name} commence à écrire, {name} passe au premier modèle disponible dans l’ordre.",
+  "agentSettings.backupModels.ask": "Demander avant de changer",
+  "agentSettings.backupModels.order": "Ordre",
+  "agentSettings.backupModels.listLabel": "Modèles de secours, dans l’ordre",
+  "agentSettings.backupModels.empty": "Aucun ordre défini. {name} propose chaque modèle disponible.",
+  "agentSettings.backupModels.add": "Ajouter un modèle de secours",
+  "agentSettings.backupModels.moveUp": "Monter {model}",
+  "agentSettings.backupModels.moveDown": "Descendre {model}",
+  "agentSettings.backupModels.remove": "Retirer {model}",
+  "agentSettings.backupModels.limited": "Limite d’utilisation atteinte · ignoré",
+  "agentSettings.backupModels.unavailable": "Indisponible pour le moment · ignoré",
+  "agentSettings.backupModels.withAccount": "{model} · {account}",
+  "agentSettings.backupModels.note":
+    "{name} ne change jamais de modèle après avoir commencé à écrire. Il revient à {model} quand la limite prend fin.",
   "agentSettings.groups.brain": "Cerveau",
   "agentSettings.groups.knows": "Sait",
   "agentSettings.groups.does": "Fait",
@@ -111,6 +140,9 @@ export const messages = {
     "Computer Use et le navigateur OpenBot ne sont pas limités ; vous pouvez désactiver Computer Use ci-dessous.",
   "agentSettings.computerUse.title": "Computer Use",
   "agentSettings.computerUse.description": "Autoriser cet agent à contrôler les apps de cet ordinateur",
+  "agentSettings.automation.title": "Scripts locaux",
+  "agentSettings.automation.description":
+    "Autoriser les scripts de l’hôte à envoyer des messages, exécuter des routines, répondre aux questions et accepter ou refuser les approbations",
   "agentSettings.runtime.workspaceEnforcedProcess":
     "Tout le processus {provider} s’exécute dans un bac à sable : une écriture à l’extérieur échoue donc. Disponible sur macOS uniquement.",
 } as const satisfies PartialTranslation<typeof source>;

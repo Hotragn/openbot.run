@@ -27,6 +27,12 @@
       "detailSha256": "8b66d2a108340a79e398bedc19efc7dad2914b0addf17c76ee9fc50b72b09c1b"
     },
     {
+      "slug": "cobrain",
+      "version": "1.0.0",
+      "featured": false,
+      "detailSha256": "039484cf64fa35ef8f5ef9a04630166337d1f63b840f4c7552c2612c22edac20"
+    },
+    {
       "slug": "figma",
       "version": "1.1.0",
       "featured": true,
@@ -43,6 +49,12 @@
       "version": "1.0.0",
       "featured": false,
       "detailSha256": "4fc370192c4c20834039fbdce4c5deb76f1553690136488aed99df5d9acdd191"
+    },
+    {
+      "slug": "vercel",
+      "version": "1.0.0",
+      "featured": false,
+      "detailSha256": "7e5ead435028c8e74d1e4bf84e7e61bc4216de8d0636a862d160e48391589253"
     },
     {
       "slug": "context7",

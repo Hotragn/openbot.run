@@ -12,17 +12,29 @@ passes only serializable, validated commands and events to the native React UI; 
 module or development build is required.
 Mobile server labels in the drawer and connection settings describe the authenticated application
 connection, not membership or Signal presence. Each membership has its own transport and recovery controller while mobile is active.
+On a return to the app, the selected server connects first; the others become active when it is
+online, or after 3 s.
 Switching servers changes the visible workspace without closing other connections. iOS `inactive`
 transitions leave connections alone. Backgrounding retains the last connection status and pauses
 recovery; transport failures received in the background are retained for resume. Only the paired desktop is Local;
-other servers are Remote regardless of the account role. Connecting becomes Online after compatibility and workspace synchronization succeed;
-transport failures and reconnect attempts show Offline, and protocol failures show Connection error.
+other servers are Remote regardless of the account role. Connecting becomes Online after compatibility succeeds and the agents,
+the read state and the sections load. These three reads run together. Cached conversations load
+again after Online, the open conversation first; a chat that did not load then loads when it opens.
+Transport failures and reconnect attempts show Offline, and protocol failures show Connection error.
 The existing RTC connection updates and recovery controller are the source of truth; the indicator
-adds no polling or health requests. Foreground resume reuses a healthy connection without a workspace
-reload. Canceled reads and event resets request data synchronization without showing a reconnect on
-a healthy connection. Invite selection and manual refresh reuse the same controller. A transient RTC
-disconnected state has a five-second recovery window, including on resume; failed or closed states
-drive recovery immediately. Backgrounding pauses the grace timer and cancels pending reads so they cannot block resume.
+adds no polling or health requests. Foreground resume reuses a healthy connection and reads the
+workspace again without showing a reconnect. The time away decides what happens to the connection:
+after less than 30 s the path is kept. After 30 s the host stopped using the path (ICE consent), so the
+peer renews its Signal socket and restarts ICE; a host that dropped the connection answers with a new
+fingerprint, and the peer fails at once instead of after a read timeout. A connection that is lost
+while a return checks it is replaced at once, with no countdown, as when the check fails. After 160 s Signal has told
+the host to drop the connection (120 s socket idle timeout, then 30 s), so the peer is replaced on the
+same session at once, without a resume hello, and the first attempt shows Connecting. Canceled reads
+and event resets request data synchronization without showing a reconnect on a healthy connection. Invite selection and manual refresh reuse the same controller. A transient RTC
+disconnected state has a 15-second recovery window, including on resume; failed or closed states
+drive recovery immediately. Signal's `rate_limited`, or a close with code 1008 and no error frame,
+makes the next Signal socket wait 60 s; another refusal with code 1008, such as an invalid ticket,
+reconnects at once. Backgrounding pauses the grace timer and cancels pending reads so they cannot block resume.
 Explicit refresh bypasses the retry cooldown without overlapping a pending connection attempt.
 The native/DOM mailbox carries concurrent commands by ID. Switching or disconnecting cancels
 pending callers immediately; peer generations reject late callbacks from a superseded host.
@@ -32,9 +44,25 @@ needs the published host. The separate development test-client role never auto-p
 Mobile Connect tickets and QR codes bind the started host ID and SHA-256 public-key fingerprint.
 Mobile verifies that binding at redemption and against the directory, pins the key, and selects
 that host rather than the first account-owned desktop. Legacy unbound QR codes require regeneration.
+A permanent Mobile Connect link uses the same URL and redemption route, so released phone apps
+accept it. It has the same host binding and redeems more than once. D1 keeps only its hash. It stops
+working when the desktop replaces or revokes it, or when the desktop session that made it ends. The
+desktop keeps the link in its encrypted session file and deletes it at sign-out.
+`mobile_auth_sessions.connect_link_host_id` records the host whose link signed in a phone. A revoke
+signs out those phones, also when the link row went with its desktop session, and the device list
+shows each phone's method. `DELETE /v1/mobile-auth/ticket?host=` spends the unused one-time codes of
+that host when the desktop cancels the code that it shows.
+A phone can also sign in with an email code. It requests the code through `/v1/auth/email/start` and
+verifies it through `/v1/mobile-auth/email/verify`, which writes the `auth_sessions` row and its
+`mobile_auth_sessions` row in one batch; `/v1/auth/email/verify` would make a desktop session. This
+session has no host binding: the phone stores `signIn: "email"` with it, connects to every host in
+the account directory and pins each host key on first use, as the web client does. A stored session
+with no host and no marker is still a legacy QR session and is revoked. The development LAN allow
+list keeps both email routes on loopback, because a development code follows from its challenge ID.
 Desktop invitation QR codes contain the same one-use link as Copy link. The signed-in mobile
 scanner validates that link and opens the invitation review before acceptance. These codes join
-one server; Mobile Connect codes sign in to the desktop account and select the paired host.
+one server; Mobile Connect codes sign in to the desktop account. Mobile keeps the paired host as the
+default server above the drawer divider until the user changes it, and opens on the first server.
 Both clients read account-wide membership from D1's indexed `remote_memberships` / `remote_hosts`
 join. An offline paired desktop does not remove other memberships, and mobile connects directly
 to each host independently. A cold launch refreshes the account directory. Both clients check again
@@ -197,6 +225,39 @@ The first released Team API protocol is `1`. All later HTTP requests include `Op
 Each protocol has a frozen codec and adapter in `packages/contracts/src/team-protocol`. The v1 HTTP codec owns the fixed route registry and validates JSON requests and responses before the adapter converts current values. Uploads, downloads, and other binary routes use the same negotiated headers and error envelope. The host does not write current service or IPC values directly to the network. Breaking or semantic changes add a new protocol directory and registry entry. A released adapter keeps its original meaning.
 
 Capabilities describe additive behavior. The client sends its capability list when it sets the event scope. The host sends optional events only when the client declared the related capability. A missing capability disables only that feature. An unknown optional event is ignored. A malformed known event closes the connection as `protocol_error` because the client cannot safely apply it.
+
+The optional `agent-memories-v1` capability adds three POST routes. `/v1/agent-memories/page`
+returns up to 256 memories. `/v1/agent-memories/selection` returns up to 256 selection records,
+the agent ID, and essential-memory byte usage. Both use ascending memory IDs and an `after`
+cursor (`null` for the first page). Clients validate owner and cursor order. Edits do not move IDs
+between pages. Reads across several pages are not an atomic snapshot; the next refresh sees
+concurrent changes. `/v1/agent-memories/inclusion` changes up to 25 selections with expected
+revisions and returns an empty acknowledgement; the client then reads selection pages again.
+Each route requires authentication and a visible agent. Selection writes use the same member
+access as existing memory writes. User choices override automatic selection.
+
+The released full-list GET route, memory shapes, and 2 MiB frame limit stay unchanged. A new
+client connected to an older host keeps text editing and hides selection controls. An older
+client can edit text on a new host without changing inclusion. Storage choices remain 64, 128,
+256, and 512. Lowering the setting never deletes existing entries.
+
+Only essential memories enter startup instructions, in a block limited to 8,192 UTF-8 bytes.
+Claude gets that block with a user turn instead: the full block in the first turn and after a
+compaction, and only the change after a memory edit. A memory change then keeps the cached
+system prompt and does not restart the Claude query. A profile change still restarts it.
+Saved memories stay on the host in SQLite. Agents can use bounded local search and ID-paged
+listing to recall other entries. FTS5 uses `unicode61` and BM25. Queries match any literal term;
+equal scores use the newest update, then the memory ID. Search returns at most 10 entries,
+and maintenance pages return at most 25. Both responses are limited to 8,192 UTF-8 bytes.
+The search index stays local. Essential prompt text and requested tool results go to the active
+provider through the existing secret-redaction path.
+
+Selection metadata is separate from the released memory shape. Migration 32 preserves memory
+text, IDs, and dates, and selects recent manual entries before recent automatic entries. The same
+serializer checks the complete prompt block during migration, mutation, and prompt generation.
+Automatic text and selection changes stay pending until the turn completes successfully. Commit
+checks ownership, revisions, user choices, and capacity again. Agent tools cannot change or delete
+a user-controlled selection. The user can release that control without changing its inclusion.
 
 Team API failures use a JSON error envelope with `error` and a stable `code`. Compatibility codes are `client_update_required`, `host_update_required`, and `protocol_error`. Authentication and network failures are projected to `authentication_required` and `network_unavailable` in the desktop connection state. A confirmed compatibility or protocol error stops data-plane requests and automatic reconnect until the user selects `Retry`, restarts, or updates.
 

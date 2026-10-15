@@ -2,6 +2,9 @@ import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import {
   type AcknowledgeFailedTurnInput,
   type AgentIpcRequest,
+  type AgentMemorySelectionChange,
+  type CancelAgentWaitInput,
+  type CancelMessageLinkInput,
   type CancelQueuedMessageInput,
   type ChooseAttachmentsInput,
   type CreateAgentInput,
@@ -19,32 +22,39 @@ import {
   type ImportAttachmentsInput,
   type InterruptTurnInput,
   isAgentAccess,
+  isAgentBackupModels,
   isAgentModel,
   isAgentProvider,
   isAvatarHue,
   isAvatarSeed,
   isBusyMessageMode,
   isMessageReaction,
+  isProviderAccountId,
   isReasoningEffort,
   isRoutineSchedule,
   type ListChannelRoutineRunsInput,
   type ListRoutineRunsInput,
   type MarkConversationReadInput,
   type OpenAttachmentInput,
+  type OpenMessageLinkInput,
   type OpenSharedFileInput,
   type OpenWorkspaceFileInput,
+  type PasteMessageLinkInput,
   type ReadConversationPageInput,
   type ReorderQueueInput,
   type RespondToApprovalInput,
   type RespondToBrowserTakeoverInput,
   type RespondToPromptInput,
   ROUTINE_LIMIT_POLICIES,
+  ROUTINE_MISSED_POLICIES,
   type RoutineCalendarInput,
   type RoutineLimitPolicy,
+  type RoutineMissedPolicy,
   type SearchConversationFilesInput,
   type SearchConversationMessagesInput,
   type SendMessageInput,
   type SetAgentAvatarInput,
+  type SetAgentMemoryInclusionInput,
   type SetMessageReactionInput,
   type SidebarLayoutAction,
   type SteerQueuedMessageInput,
@@ -64,7 +74,7 @@ import type { PayloadDecoder } from "../trusted-ipc";
 import { parseAvatarImage } from "./avatar-inputs";
 import { isObject, requireString } from "./validation";
 
-export function parseAgentRequest(value: unknown): AgentIpcRequest {
+function parseAgentRequest(value: unknown): AgentIpcRequest {
   if (!isObject(value)) throw new Error("Invalid agent request.");
   return {
     serverId: requireString(value.serverId, "serverId"),
@@ -231,6 +241,7 @@ export function parseCreateRoutine(value: unknown): CreateRoutineInput {
     timezone: requireString(value.timezone, "timezone", 128),
     schedule: parseRoutineSchedule(value.schedule),
     ...optionalLimitPolicy(value.limitPolicy),
+    ...optionalMissedPolicy(value.missedPolicy),
   };
 }
 
@@ -249,7 +260,7 @@ export function parseUpdateRoutine(value: unknown): UpdateRoutineInput {
     parsed.active = value.active;
   }
   if (value.schedule !== undefined) parsed.schedule = parseRoutineSchedule(value.schedule);
-  Object.assign(parsed, optionalLimitPolicy(value.limitPolicy));
+  Object.assign(parsed, optionalLimitPolicy(value.limitPolicy), optionalMissedPolicy(value.missedPolicy));
   if (Object.keys(parsed).length === 2) throw new Error("A routine update is required.");
   return parsed;
 }
@@ -258,6 +269,12 @@ function optionalLimitPolicy(value: unknown): { limitPolicy?: RoutineLimitPolicy
   if (value === undefined) return {};
   if (!isOneOf(ROUTINE_LIMIT_POLICIES, value)) throw new Error("Invalid routine limit policy.");
   return { limitPolicy: value };
+}
+
+function optionalMissedPolicy(value: unknown): { missedPolicy?: RoutineMissedPolicy } {
+  if (value === undefined) return {};
+  if (!isOneOf(ROUTINE_MISSED_POLICIES, value)) throw new Error("Invalid routine missed-run policy.");
+  return { missedPolicy: value };
 }
 
 export function parseDeleteRoutine(value: unknown): DeleteRoutineInput {
@@ -340,6 +357,7 @@ export function parseCreateChannelRoutine(value: unknown): CreateChannelRoutineI
     timezone: requireString(value.timezone, "timezone", 128),
     schedule: parseRoutineSchedule(value.schedule),
     ...optionalLimitPolicy(value.limitPolicy),
+    ...optionalMissedPolicy(value.missedPolicy),
   };
 }
 
@@ -358,7 +376,7 @@ export function parseUpdateChannelRoutine(value: unknown): UpdateChannelRoutineI
     parsed.active = value.active;
   }
   if (value.schedule !== undefined) parsed.schedule = parseRoutineSchedule(value.schedule);
-  Object.assign(parsed, optionalLimitPolicy(value.limitPolicy));
+  Object.assign(parsed, optionalLimitPolicy(value.limitPolicy), optionalMissedPolicy(value.missedPolicy));
   if (Object.keys(parsed).length === 2) throw new Error("A routine update is required.");
   return parsed;
 }
@@ -392,6 +410,27 @@ export function parseReadConversationPage(value: unknown): ReadConversationPageI
     anchor: parsePageAnchor(value.anchor),
     limit: parsePageLimit(value.limit),
   };
+}
+
+export function parseOpenMessageLink(value: unknown): OpenMessageLinkInput {
+  if (!isObject(value)) throw new Error("Invalid message link request.");
+  return {
+    agentId: requireString(value.agentId, "agentId", INPUT_LIMITS.identifier),
+    url: requireString(value.url, "URL", INPUT_LIMITS.browserUrl),
+  };
+}
+
+export function parsePasteMessageLink(value: unknown): PasteMessageLinkInput {
+  if (!isObject(value)) throw new Error("Invalid message link request.");
+  return {
+    url: requireString(value.url, "URL", INPUT_LIMITS.browserUrl),
+    address: requireString(value.address, "Address", INPUT_LIMITS.signInRelayAddress),
+  };
+}
+
+export function parseCancelMessageLink(value: unknown): CancelMessageLinkInput {
+  if (!isObject(value)) throw new Error("Invalid message link request.");
+  return { url: requireString(value.url, "URL", INPUT_LIMITS.browserUrl) };
 }
 
 export function parseSearchConversationMessages(value: unknown): SearchConversationMessagesInput {
@@ -548,11 +587,32 @@ export function parseUpdateAgent(value: unknown): UpdateAgentInput {
     if (!isBoolean(value.allowAutomation)) throw new Error("Invalid automation value.");
     result.allowAutomation = value.allowAutomation;
   }
+  if (value.providerAccountId !== undefined) {
+    if (value.providerAccountId !== null && !isProviderAccountId(value.providerAccountId))
+      throw new Error("Invalid provider account.");
+    result.providerAccountId = value.providerAccountId;
+  }
   if (value.busyMessageMode !== undefined) {
     if (value.busyMessageMode !== null && !isBusyMessageMode(value.busyMessageMode)) {
       throw new Error("Invalid busy message mode.");
     }
     result.busyMessageMode = value.busyMessageMode;
+  }
+  if (value.backupModels !== undefined) {
+    if (value.backupModels !== null && !isAgentBackupModels(value.backupModels))
+      throw new Error("Invalid backup models.");
+    result.backupModels = value.backupModels && {
+      automatic: value.backupModels.automatic,
+      order: value.backupModels.order.map(({ provider, model, providerAccountId }) => ({
+        provider,
+        model,
+        ...(providerAccountId === undefined ? {} : { providerAccountId }),
+      })),
+    };
+  }
+  if (value.leaveUsageLimit !== undefined) {
+    if (!isBoolean(value.leaveUsageLimit)) throw new Error("Invalid usage limit switch.");
+    result.leaveUsageLimit = value.leaveUsageLimit;
   }
   if (value.avatarSeed !== undefined) {
     if (!isAvatarSeed(value.avatarSeed)) throw new Error("Invalid avatar seed.");
@@ -666,6 +726,14 @@ export function parseCancelQueuedMessage(value: unknown): CancelQueuedMessageInp
   return {
     agentId: requireString(value.agentId, "agentId"),
     deliveryId: requireString(value.deliveryId, "deliveryId"),
+  };
+}
+
+export function parseCancelAgentWait(value: unknown): CancelAgentWaitInput {
+  if (!isObject(value)) throw new Error("Invalid wait cancellation request.");
+  return {
+    agentId: requireString(value.agentId, "agentId"),
+    waitId: requireString(value.waitId, "waitId"),
   };
 }
 
@@ -799,4 +867,27 @@ export function parseBrowserTakeoverResponse(value: unknown): RespondToBrowserTa
 export function parseQueueEdit(value: unknown): EditQueuedMessageInput {
   if (!isObject(value)) throw new Error("Invalid queue edit request.");
   return { agentId: parseAgentId(value.agentId), ...decodeQueueEditRequest(value) };
+}
+
+export function parseSetAgentMemoryInclusion(value: unknown): SetAgentMemoryInclusionInput {
+  if (!isObject(value) || !Array.isArray(value.changes) || value.changes.length === 0 || value.changes.length > 25)
+    throw new Error("Invalid memory inclusion request.");
+  const changes = value.changes.map((change): AgentMemorySelectionChange => {
+    if (
+      !isObject(change) ||
+      (change.inclusion !== "essential" && change.inclusion !== "searchable" && change.inclusion !== "automatic") ||
+      typeof change.expectedRevision !== "number" ||
+      !Number.isSafeInteger(change.expectedRevision) ||
+      change.expectedRevision < 0
+    )
+      throw new Error("Invalid memory inclusion change.");
+    return {
+      memoryId: requireString(change.memoryId, "memoryId", INPUT_LIMITS.identifier),
+      inclusion: change.inclusion,
+      expectedRevision: change.expectedRevision,
+    };
+  });
+  if (new Set(changes.map((change) => change.memoryId)).size !== changes.length)
+    throw new Error("Duplicate memory inclusion change.");
+  return { agentId: requireString(value.agentId, "agentId", INPUT_LIMITS.identifier), changes };
 }
